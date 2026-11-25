@@ -23,7 +23,7 @@ aimux model proxy status            # the stable listener on 7385
 aimux model proxy status --port 7386  # a dev listener
 ```
 
-It prints the proxy's state and uptime, whether its Codex app-server is running, how many turns it has sent to Codex and how the last one went, and the same for the rate-limit checks behind the usage snapshot. Those checks cost no tokens, so a recent one shows the Codex login still works; only the stable listener makes them. Asking costs nothing and never starts Codex.
+It prints the proxy's state and uptime, whether its Codex app-server is running, how many turns it has sent to Codex and how the last one went, and the same for the rate-limit checks behind the usage snapshot. Those checks cost no tokens, so a recent one shows the Codex login still works; only the stable listener makes them. Asking costs nothing and never starts Codex. The proxy starts Codex itself when it starts and writes how long that took to its log (`model proxy: Codex started in 3636ms`), so the first request does not wait for it. If the start fails, the log says why, the proxy keeps serving, and the next request starts Codex again.
 
 The command exits non-zero when the proxy is degraded or not running, so a monitor can act on the exit code. The proxy is degraded when its most recent turn failed, or its most recent rate-limit check failed; a later success clears it. A request Claude Code malformed is not counted, and neither is a turn you interrupted.
 
@@ -63,7 +63,7 @@ The promote is the careful path for the model proxy: it tests a build before ins
 
 Close stable Claude Code sessions and stop the hand-run dev listener first. In a fresh terminal outside Claude Code, run `scripts/model-proxy-promote promote`. The script runs the Go suite, channel tests, golangci-lint against the `origin/main` baseline, and the live Codex test. It then builds a candidate, starts it on `7386`, and checks a `claude -p` response through it. The live checks use your Codex allowance.
 
-Only then does it back up the program the stable job runs to `aimux.prev` beside it, replace that program by rename, restart the LaunchAgent, and require authenticated HTTP 200 from `/v1/models`. If the stable health check fails, it tries to restore the backup. Run `scripts/model-proxy-promote rollback` from a fresh terminal to restore that backup manually. It restarts the same job and checks the same endpoint.
+Only then does it back up the program the stable job runs to `aimux.prev` beside it, replace that program by rename, restart the LaunchAgent, and require authenticated HTTP 200 from `/v1/models` and one real answer through the stable port. The first answer after a restart has timed out on a good build, so a failed answer is asked for once more before it counts. If the stable check still fails, it tries to restore the backup. Run `scripts/model-proxy-promote rollback` from a fresh terminal to restore that backup manually. It restarts the same job and checks the same endpoint.
 
 With a local `claude-hud` clone under `~/go/src/github.com/zanetworker/claude-hud`, `scripts/model-proxy-promote pin-hud [commit]` prepares a detached checkout at a committed revision (defaults to `HEAD`). Point your statusline wrapper at `~/.claude/claude-hud-pins/current/src/index.ts`. Promotion switches that pin after the proxy health check. To use a previous HUD revision, run `pin-hud` with its commit; proxy rollback only restores the executable.
 

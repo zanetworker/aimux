@@ -64,6 +64,13 @@ inference_ok() {
     grep -q 'AIMUX_PROXY_OK'
 }
 
+# The stable check, with one retry: the first answer after a restart has timed out on a good build.
+stable_inference_ok() {
+  inference_ok "$1" && return 0
+  printf 'The first answer on port %s failed; trying once more.\n' "$1" >&2
+  inference_ok "$1"
+}
+
 # Armed from the binary swap until stable passes its checks, so an interrupt or failure in between restores
 # the previous binary instead of leaving an unchecked one for launchd to start.
 rollback_armed=0
@@ -193,7 +200,7 @@ main() {
 
   rollback_armed=1
   install_candidate "$scratch/aimux"
-  if ! launchctl kickstart -k "$job" || ! wait_for_models 7385 || ! inference_ok 7385; then
+  if ! launchctl kickstart -k "$job" || ! wait_for_models 7385 || ! stable_inference_ok 7385; then
     rollback_armed=0
     if restore_previous && launchctl kickstart -k "$job" && wait_for_models 7385; then
       die 'Candidate failed its stable health or inference check; restored the previous binary.'

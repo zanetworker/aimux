@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -313,5 +314,138 @@ func TestCodexBackendTurnStartTimesOut(t *testing.T) {
 	}
 	if !strings.Contains(string(protocol), "turn ") {
 		t.Fatalf("the deadline came before turn/start was sent; fake log:\n%s", protocol)
+	}
+}
+
+// lockedBuffer collects the proxy's stderr: the backend and the app-server's stderr copier both write to it.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// The proxy brings Codex up when it starts, so the first request does not pay for the start and a Codex that
+// cannot start is known before anyone asks. Later turns and a second Start share that one process.
+func TestCodexBackendStart_BringsCodexUpBeforeAnyTurn(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "protocol.log")
+	t.Setenv("AIMUX_FAKE_CODEX_LOG", log)
+	var stderr lockedBuffer
+	backend := NewCodexBackend(CodexOptions{Command: fakeCodex, Stderr: &stderr})
+	t.Cleanup(backend.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	if backend.health().Codex.AppServerRunning {
+		t.Fatal("app-server reported running before Start")
+	}
+	if err := backend.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if !backend.health().Codex.AppServerRunning {
+		t.Fatal("app-server not running after Start")
+	}
+	if got := stderr.String(); !strings.Contains(got, "model proxy: Codex started in ") {
+		t.Fatalf("stderr %q does not say how long the start took", got)
+	}
+
+	var text string
+	if _, err := backend.Run(ctx, fakeTurn("warm"), func(e Event) error { text += e.Text; return nil }); err != nil || text != "warm" {
+		t.Fatalf("turn after Start: text %q, err %v", text, err)
+	}
+	if err := backend.Start(ctx); err != nil {
+		t.Fatalf("second Start: %v", err)
+	}
+	logBytes, err := os.ReadFile(log) // #nosec G304 -- test temp file
+	if err != nil || strings.Count(string(logBytes), "initialize ") != 1 {
+		t.Fatalf("expected one process for Start, a turn and a second Start: %s, %v", logBytes, err)
+	}
+	if n := strings.Count(stderr.String(), "Codex started in "); n != 1 {
+		t.Fatalf("start reported %d times, want once", n)
+	}
+}
+
+// The start time is logged where Codex is started, so it is there when a request, not Start, was first.
+func TestCodexBackend_LogsTheStartWhoeverAskedFirst(t *testing.T) {
+	t.Setenv("AIMUX_FAKE_CODEX_LOG", filepath.Join(t.TempDir(), "protocol.log"))
+	var stderr lockedBuffer
+	backend := NewCodexBackend(CodexOptions{Command: fakeCodex, Stderr: &stderr})
+	t.Cleanup(backend.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	if _, err := backend.Run(ctx, fakeTurn("first"), func(Event) error { return nil }); err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	if err := backend.Start(ctx); err != nil {
+		t.Fatalf("Start after a turn: %v", err)
+	}
+	if n := strings.Count(stderr.String(), "model proxy: Codex started in "); n != 1 {
+		t.Fatalf("start reported %d times, want once, by the turn that started Codex: %q", n, stderr.String())
+	}
+}
+
+// A failed start says why and leaves the proxy serving: the next request starts Codex again.
+func TestCodexBackendStart_FailureIsReportedAndTheNextTurnRetries(t *testing.T) {
+	t.Setenv("AIMUX_FAKE_CODEX_LOG", filepath.Join(t.TempDir(), "protocol.log"))
+	t.Setenv("AIMUX_FAKE_CODEX_CATALOG_FAIL", "1")
+	var stderr lockedBuffer
+	backend := NewCodexBackend(CodexOptions{Command: fakeCodex, Stderr: &stderr})
+	t.Cleanup(backend.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	err := backend.Start(ctx)
+	if err == nil || !strings.Contains(err.Error(), "catalog refresh failed") {
+		t.Fatalf("Start error %v, want the catalog failure", err)
+	}
+	if backend.health().Codex.AppServerRunning {
+		t.Fatal("app-server reported running after a failed start")
+	}
+	want := "model proxy: Codex did not start, the first request will try again: "
+	if got := stderr.String(); !strings.Contains(got, want) || !strings.Contains(got, "catalog refresh failed") {
+		t.Fatalf("stderr %q, want %q with the cause", got, want)
+	}
+
+	t.Setenv("AIMUX_FAKE_CODEX_CATALOG_FAIL", "")
+	var text string
+	if _, err := backend.Run(ctx, fakeTurn("recovered"), func(e Event) error { text += e.Text; return nil }); err != nil || text != "recovered" {
+		t.Fatalf("turn after a failed start: text %q, err %v", text, err)
+	}
+}
+
+// Shutting down during the start is not a failure worth a log line, and a closed backend does not start Codex.
+func TestCodexBackendStart_ShutdownIsQuiet(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "protocol.log")
+	t.Setenv("AIMUX_FAKE_CODEX_LOG", log)
+	var stderr lockedBuffer
+	backend := NewCodexBackend(CodexOptions{Command: fakeCodex, Stderr: &stderr})
+	t.Cleanup(backend.Close)
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := backend.Start(cancelled); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Start on a cancelled context: %v", err)
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("a shutdown was logged: %q", got)
+	}
+
+	backend.Close()
+	if err := backend.Start(context.Background()); err == nil || !strings.Contains(err.Error(), "closed") {
+		t.Fatalf("Start on a closed backend: %v", err)
+	}
+	if _, err := os.Stat(log); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Codex was started: %v", err)
 	}
 }
