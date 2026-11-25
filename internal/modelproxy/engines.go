@@ -152,6 +152,12 @@ func serveEngines(w http.ResponseWriter, r *http.Request, carried credentials, p
 			writeError(w, http.StatusUnauthorized, "authentication_error", errNoCredential.Error())
 			return
 		}
+		// One thing is new for a session that presents the key in its base URL. Claude Code opens every
+		// session with HEAD /api/hello, which carries no login; sent on, it opens the proxy's connection to
+		// Anthropic before the first prompt, as it would have opened the client's own.
+		if carried.viaPath && r.Method == http.MethodHead && r.URL.Path == "/api/hello" && config.anthropic.hello(w, r) {
+			return
+		}
 		codexRoutes.ServeHTTP(w, r)
 		return
 	}

@@ -2,6 +2,7 @@ package modelproxy
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // AnthropicUpstream is where the Anthropic engine sends requests.
@@ -157,6 +159,41 @@ func (e *anthropicEngine) forward(w http.ResponseWriter, r *http.Request, reques
 		dropConnection(w)
 	}
 	return result
+}
+
+// helloTimeout bounds the wait for Anthropic's answer to a session's opening request. The session is waiting on
+// it, and may not use Anthropic at all.
+var helloTimeout = 5 * time.Second
+
+// hello sends a session's opening request, HEAD /api/hello, to the upstream, and reports whether it answered
+// w. It is a new request, not the caller's passed on: nothing of the caller's travels with it but the name of
+// its client, so no header the caller set can reach the upstream this way. When the upstream does not answer in
+// time, nothing is written and the caller is answered as it was before there was a second engine.
+func (e *anthropicEngine) hello(w http.ResponseWriter, r *http.Request) bool {
+	ctx, cancel := context.WithTimeout(r.Context(), helloTimeout)
+	defer cancel()
+	target := *e.upstream
+	target.Path = "/api/hello"
+	out, err := http.NewRequestWithContext(ctx, http.MethodHead, target.String(), nil)
+	if err != nil {
+		return false
+	}
+	if agent := r.Header.Get("User-Agent"); agent != "" && !e.holdsProxyKey(agent) {
+		out.Header.Set("User-Agent", agent)
+	}
+	resp, err := e.client.Do(out) //nolint:gosec // G704: the address is the engine's fixed upstream and a fixed path
+	if err != nil {
+		return false
+	}
+	defer func() { _ = resp.Body.Close() }()
+	header := w.Header()
+	for name, values := range resp.Header {
+		if !hopByHop(name, resp.Header) {
+			header[name] = values
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	return true
 }
 
 // outgoingHeader is the caller's header as the upstream should get it: everything, less the headers that belong
