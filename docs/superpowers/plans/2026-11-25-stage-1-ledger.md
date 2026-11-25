@@ -20,7 +20,7 @@
 - A write that fails is counted and shown and never changes what happened to the request. The proxy answers the same with the ledger folder missing or full.
 - Readers never write.
 - Every line carries `schema: "aimux.ledger/1"`. A reader that meets another schema skips the line, counts it, and marks totals that span it incomplete. A writer that finds a newer schema at the end of its file refuses to write.
-- Field names follow OpenTelemetry's generative-AI conventions where one exists (`gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`); the code already imports `semconv/v1.26.0`, and each line records `semconv: "1.26.0"`. aimux's own fields use the `aimux.` prefix.
+- Field names follow OpenTelemetry's generative-AI conventions where one exists (`gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`); conventions 1.27.0, the first version with `gen_ai.usage.input_tokens` (1.26.0 still says `prompt_tokens`), and each line records `semconv: "1.27.0"`. aimux's own fields use the `aimux.` prefix.
 - The session id is the harness's own, in full. The request history's 8-character tag is not used in the ledger.
 - The model proxy's request history (`requests.jsonl`) and `aimux model proxy stats` are not changed.
 - Core packages must not import `bubbletea`, `lipgloss` or `tui/`. `internal/ledger` imports nothing from the repository.
@@ -78,7 +78,7 @@ Expected: `5` (no fixture contains a `text` field)
 
 ```go
 const Schema = "aimux.ledger/1"
-const SemConv = "1.26.0"
+const SemConv = "1.27.0"
 
 // Added to Line. Every new field is omitempty except Schema.
 Schema        string `json:"schema"`
@@ -89,7 +89,7 @@ RequestModel  string `json:"gen_ai.request.model,omitempty"`
 ResponseModel string `json:"gen_ai.response.model,omitempty"`
 Engine        string `json:"aimux.engine,omitempty"`        // "codex"
 Effort        string `json:"aimux.effort,omitempty"`
-InputTokens   int64  `json:"gen_ai.usage.input_tokens,omitempty"`  // uncached input
+InputTokens   int64  `json:"gen_ai.usage.input_tokens,omitempty"`  // the whole prompt, cached part included
 OutputTokens  int64  `json:"gen_ai.usage.output_tokens,omitempty"`
 CacheRead     int64  `json:"aimux.usage.cache_read_input_tokens,omitempty"`
 CacheWrite    int64  `json:"aimux.usage.cache_write_input_tokens,omitempty"`
@@ -132,7 +132,7 @@ func ReadDir(dir string) ([]Line, ReadReport, error)
 ```go
 func TestWriter_NumbersLinesAndContinuesAfterReopen(t *testing.T)
 // two writes, close, reopen, one write: file has seq 1,2,3; every line has schema "aimux.ledger/1",
-// semconv "1.26.0", writer == the name given; file mode 0600, dir mode 0700.
+// semconv "1.27.0", writer == the name given; file mode 0600, dir mode 0700.
 
 func TestWriter_ContinuesAfterATornLastLine(t *testing.T)
 // file ends with `{"seq":3,"wri` (no newline): reopen, write: the new line is seq 3 on its own line,
@@ -171,7 +171,7 @@ func TestReadDir_MissingFolderIsEmpty(t *testing.T)
 // ReadDir(filepath.Join(t.TempDir(), "none")) returns no lines, a zero report and a nil error.
 
 func TestReadDir_ModelCallRoundTrips(t *testing.T)
-// a line with RequestModel "claude-sonnet-5-5", ResponseModel "codex:gpt-6.2-sol", InputTokens 1200,
+// a line with RequestModel "claude-sonnet-5-5", ResponseModel "codex:gpt-6.2-sol", InputTokens 91200,
 // CacheRead 90000, OutputTokens 40, Outcome "ok" is written and read back equal, and the raw file contains
 // `"gen_ai.request.model":"claude-sonnet-5-5"` and no key named "prompt", "text" or "path".
 ```
@@ -311,7 +311,7 @@ type MeterRow struct {
 	Key          string   `json:"key"`     // the session id, the served model, or a day as 2006-01-02
 	Requests     int      `json:"requests"`
 	Failed       int      `json:"failed"`  // outcome other than "ok"
-	InputTokens  int64    `json:"input_tokens"`        // uncached
+	InputTokens  int64    `json:"input_tokens"`        // uncached: the line's input tokens minus its cache read
 	CachedTokens int64    `json:"cached_input_tokens"`
 	OutputTokens int64    `json:"output_tokens"`
 	Estimated    bool     `json:"estimated,omitempty"` // any call in the row had estimated usage
@@ -337,7 +337,7 @@ func Meter(dir string, opts MeterOptions) (MeterReport, error)
 
 ```go
 func TestMeter_SumsBySession(t *testing.T)
-// session A: 2 calls (1200+800 in, 90000 cached, 40+60 out, one failed); session B: 1 call.
+// session A: 2 calls (lines with input 91200 and 800, cache read 90000 and 0, 40+60 out, one failed); session B: 1 call.
 // rows[0] is A with Requests 2, Failed 1, InputTokens 2000, CachedTokens 90000, OutputTokens 100,
 // Models ["codex:gpt-6.2-sol"], Asked ["claude-sonnet-5-5", "codex:gpt-6.2-sol"]; Total.Requests 3.
 
