@@ -1,6 +1,6 @@
 # Ledger identity contract
 
-**What exists today:** the line type and the in-memory counting rule in `internal/ledger`, with tests. **Planned, not built:** the ledger files, the writers in each service, and the assignment of ids at run time. This document is the contract those will follow.
+**What exists today:** in `internal/ledger`, the line type (schema `aimux.ledger/1`), the counting rule, a writer (`OpenWriter`: one file per writer, numbered lines, failed writes counted) and a reader (`ReadDir`: every `*.jsonl` file in the folder, lines of another schema skipped and counted), with tests. **Planned, not built:** the writers in each service and the assignment of ids at run time. This document is the contract those will follow.
 
 The ledger is a folder of JSON lines files, one file per writer. This page says which ids each line carries, where each writer gets them, and the rule a reader uses so every action is counted once. The code for the rule is `ledger.Count` in `internal/ledger`.
 
@@ -60,3 +60,13 @@ Two assumptions this contract rests on have not been tested yet:
 
 - Whether an MCP request carries the harness's call id to the MCP proxy and the tool gateway. If it does not, the MCP proxy's secondary lines have no call id and all land in unmatched, which limits the cross-check but cannot cause double counting.
 - That Codex hooks receive a call id the model proxy also sees. If they do not, a Codex tool call reported by its hook cannot be joined to the model call that asked for it.
+
+## The file format
+
+One JSON object per line, in `~/.aimux/ledger/<writer>.jsonl` (folder 0700, files 0600). Every line names its `schema`. Field names follow OpenTelemetry's generative-AI conventions where one exists (`gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`), version 1.27.0 (the first with `gen_ai.usage.input_tokens`), recorded on each line as `semconv`; aimux's own fields start with `aimux.`. A line says how an action went and never what it said: no prompt, answer, tool argument or path.
+
+Two rules keep a mix of versions safe. A reader that meets a line of a schema it does not know skips it and reports how many it skipped, and any total over them is incomplete. A writer that finds such a line at the end of its own file refuses to write there.
+
+A writer continues its numbering from the last line on disk. A write that fails is counted, and its number is not used again, so a reader sees the loss as a gap. One limit: lines lost at the very end of a file, just before a restart, leave no gap, because the numbering picks up from what is on disk. They show only in the writer's health answer (its latest number and its count of failed writes) while it runs.
+
+`gen_ai.usage.input_tokens` is the whole prompt, as OpenTelemetry defines it; the part read from a cache is included in it and also given on its own as `aimux.usage.cache_read_input_tokens`. Only one process may have a ledger file open for writing; a second is refused.
