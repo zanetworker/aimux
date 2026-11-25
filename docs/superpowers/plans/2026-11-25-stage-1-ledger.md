@@ -207,13 +207,22 @@ func LedgerName(port int) string
 
 // turns numbers a session's turns. next reports the turn a request belongs to: mainConversation is false for a
 // subagent or background request; startsTurn is true when the request ends in a user message that is not only
-// tool results. The number is returned as a decimal string, "" when session is empty.
+// tool results; prompts is how many such user messages the request's own message list holds. The number never
+// goes below prompts, so a session the table forgot, or a proxy that restarted, does not reuse a number while the
+// conversation is still in the request. It is returned as a decimal string, "" when session is empty.
 type turns struct{ /* per-session counters, bounded like the session table */ }
-func (t *turns) next(session string, mainConversation, startsTurn bool) (turn string, side bool)
+func (t *turns) next(session string, mainConversation, startsTurn bool, prompts int) (turn string, side bool)
+// seed sets each session's counter from lines already in the ledger, so a restart after a compaction (when the
+// request no longer holds the earlier prompts) still goes on from the last number written.
+func (t *turns) seed(lines []ledger.Line)
 
-// Added to Liveness, both omitted when zero:
+// WithLedgerOff records that the ledger could not be opened, so health can say so instead of looking healthy.
+func WithLedgerOff() HandlerOption
+
+// Added to Liveness, each omitted when zero:
 LedgerSeq    uint64 `json:"ledger_seq,omitempty"`
 LedgerFailed uint64 `json:"ledger_failed,omitempty"`
+LedgerOff    bool   `json:"ledger_off,omitempty"` // the ledger file could not be opened at start
 ```
 
 - Line content: `Kind` `model_call`; `Session` the full id from the request's `metadata.user_id` `session_id`, else the `X-Claude-Code-Session-Id` header, else empty; `Turn` from `turns.next`; `Call` a new id (`"mc_" + rand.Text()`); `RequestModel` the model the client named; `ResponseModel` `"codex:" + turn.Model`; `Engine` `"codex"`; `Harness` `"claude-code"` when the `User-Agent` starts with `claude-cli`, else empty; tokens, estimate flag, time to first byte and duration from the same values the request history gets; `Outcome` `"ok"` or the value the history's `error` field would hold. A request the proxy rejects before Codex (`invalid_request`) writes no line: it is not a model call.
@@ -231,6 +240,12 @@ func TestTurns_SessionsDoNotShareNumbers(t *testing.T)
 
 func TestTurns_ForgetsIdleSessions(t *testing.T)
 // more sessions than the table holds: the oldest is dropped and the table does not grow past its bound.
+
+func TestTurns_AForgottenSessionDoesNotReuseANumber(t *testing.T)
+// session A reaches "2" and is dropped from the table; its next prompt arrives with prompts == 3: the turn is "3".
+
+func TestTurns_SeededFromTheLedgerAfterARestart(t *testing.T)
+// seed with lines for session A up to turn "7"; a prompt after a compaction (prompts == 1) is turn "8".
 ```
 
 - [ ] **Step 2: Run to see them fail, implement `turns.go`, run to see them pass.**
@@ -255,9 +270,12 @@ func TestLedger_FailedTurnIsWrittenWithItsKind(t *testing.T)
 func TestLedger_RejectedRequestWritesNoLine(t *testing.T)
 // a malformed body: HTTP 400, the request history records invalid_request, the ledger file has no line.
 
-func TestLedger_UnwritableFolderDoesNotChangeTheAnswer(t *testing.T)
-// writer opened, then its folder made read-only and the file removed: the request answers 200 with the same
-// body as without a ledger, and Liveness reports ledger_failed == 1.
+func TestLedger_AFailingLedgerDoesNotChangeTheAnswer(t *testing.T)
+// the writer is closed underneath the handler (removing an open file would not stop writes to it): the request
+// answers 200 with the same body as without a ledger, and Liveness reports ledger_failed == 1.
+
+func TestLiveness_SaysWhenThereIsNoLedger(t *testing.T)
+// a handler built with WithLedgerOff(): GET /healthz carries "ledger_off":true.
 
 func TestLedger_TwoProxiesWriteTwoFiles(t *testing.T)
 // LedgerName(StablePort) == "model-proxy"; LedgerName(7386) == "model-proxy-7386"; two handlers with two
@@ -272,7 +290,7 @@ func TestLiveness_ReportsLedgerSeq(t *testing.T)
 Run: `go test ./internal/modelproxy/ -count=1 -race`
 Expected: PASS
 
-- [ ] **Step 5: Wire the command and the status row.** `model proxy serve` opens `ledger.OpenWriter(filepath.Join(home, ".aimux", "ledger"), modelproxy.LedgerName(bound))`; when that fails it prints `model proxy: no ledger: <error>` and serves on, as it does for the request history. `readModelStatus` adds an attention item `N ledger lines were not written` with the fix `aimux model proxy status` when `ledger_failed > 0`. Add `TestProbe_ModelProxyLedgerFailures` in `status_probes_test.go` asserting that item for `ledger_failed: 3`.
+- [ ] **Step 5: Wire the command and the status row.** `model proxy serve` opens `ledger.OpenWriter(filepath.Join(home, ".aimux", "ledger"), modelproxy.LedgerName(bound))`; when that fails it prints `model proxy: no ledger: <error>`, passes `WithLedgerOff()` and serves on, as it does for the request history. On success it seeds the turn table from the file's lines (`ledger.ReadDir` on the folder, keeping this writer's). `readModelStatus` adds an attention item `N ledger lines were not written` when `ledger_failed > 0` and `the ledger is off` when `ledger_off`, both with the fix `aimux model proxy status`. Add `TestProbe_ModelProxyLedgerFailures` in `status_probes_test.go` asserting each item.
 
 - [ ] **Step 6: Run it for real on the dev channel.**
 
@@ -404,7 +422,7 @@ Then `git ship -m "feat: aimux cost, the first meter over the ledger" <paths>`
 - [ ] **Step 1: After the owner has promoted task 3 and used the proxy for a day, compare the two records.**
 
 Run: `aimux cost --since 24h --by model --json | jq '.total.requests'` and `aimux model proxy stats --since 24h`
-Expected: the ledger's request count equals the history's count of requests that reached Codex (the history's total minus its `invalid_request` rows). Write both numbers in the tracker's "Done" table. A difference is investigated before the stage is closed, not explained away.
+Expected: the ledger's `total.requests` plus its `unmatched` (calls with no session are in neither a row nor the total) equals the history's count of requests that reached Codex (the history's total minus its `invalid_request` rows). Write both numbers in the tracker's "Done" table. A difference is investigated before the stage is closed, not explained away.
 
 - [ ] **Step 2: Read the open item the ledger was meant to answer.** For the first request after the promote's restart, read its line's `aimux.ttfb_ms` and `aimux.duration_ms` and note them under "Not yet verified" item 10 (why a first answer took 28 to 50 seconds).
 
