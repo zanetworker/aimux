@@ -105,6 +105,7 @@ func (b *CodexBackend) process(ctx context.Context) (*appServer, error) {
 			return b.server, nil
 		}
 	}
+	began := time.Now()
 	b.versionOnce.Do(func() { warnIfUntestedCodex(ctx, b.command, b.stderr) })
 	// Without the lean catalog Codex would offer its own tools (exec, apply_patch, sub-agents), so refuse to start.
 	catalog, err := writeLeanCatalog(ctx, b.command)
@@ -152,22 +153,19 @@ func (b *CodexBackend) process(ctx context.Context) (*appServer, error) {
 	}
 	b.server = p
 	b.current.Store(p)
+	// Logged here, where Codex is really started, so the time is right whoever asked first: Start, the usage
+	// poller or a request.
+	if b.stderr != nil {
+		_, _ = fmt.Fprintf(b.stderr, "model proxy: Codex started in %dms\n", time.Since(began).Milliseconds())
+	}
 	return p, nil
 }
 
-// Start brings app-server up ahead of the first request and says on stderr how long that took, or why it failed.
-// A failure is not fatal to the proxy: the next request starts Codex again.
+// Start brings app-server up ahead of the first request. A failure is said on stderr and is not fatal to the
+// proxy: the next request starts Codex again.
 func (b *CodexBackend) Start(ctx context.Context) error {
-	before := b.current.Load()
-	began := time.Now()
-	p, err := b.process(ctx)
-	if b.stderr == nil {
-		return err
-	}
-	switch {
-	case err == nil && p != before:
-		_, _ = fmt.Fprintf(b.stderr, "model proxy: Codex started in %dms\n", time.Since(began).Milliseconds())
-	case err != nil && ctx.Err() == nil:
+	_, err := b.process(ctx)
+	if err != nil && ctx.Err() == nil && b.stderr != nil {
 		_, _ = fmt.Fprintf(b.stderr, "model proxy: Codex did not start, the first request will try again: %v\n", err)
 	}
 	return err

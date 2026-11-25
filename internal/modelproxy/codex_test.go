@@ -375,6 +375,26 @@ func TestCodexBackendStart_BringsCodexUpBeforeAnyTurn(t *testing.T) {
 	}
 }
 
+// The start time is logged where Codex is started, so it is there when a request, not Start, was first.
+func TestCodexBackend_LogsTheStartWhoeverAskedFirst(t *testing.T) {
+	t.Setenv("AIMUX_FAKE_CODEX_LOG", filepath.Join(t.TempDir(), "protocol.log"))
+	var stderr lockedBuffer
+	backend := NewCodexBackend(CodexOptions{Command: fakeCodex, Stderr: &stderr})
+	t.Cleanup(backend.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	if _, err := backend.Run(ctx, fakeTurn("first"), func(Event) error { return nil }); err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	if err := backend.Start(ctx); err != nil {
+		t.Fatalf("Start after a turn: %v", err)
+	}
+	if n := strings.Count(stderr.String(), "model proxy: Codex started in "); n != 1 {
+		t.Fatalf("start reported %d times, want once, by the turn that started Codex: %q", n, stderr.String())
+	}
+}
+
 // A failed start says why and leaves the proxy serving: the next request starts Codex again.
 func TestCodexBackendStart_FailureIsReportedAndTheNextTurnRetries(t *testing.T) {
 	t.Setenv("AIMUX_FAKE_CODEX_LOG", filepath.Join(t.TempDir(), "protocol.log"))
