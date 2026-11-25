@@ -238,3 +238,44 @@ func TestCostBadBy(t *testing.T) {
 		t.Fatalf("cost --by week: %v\n%s", err, out)
 	}
 }
+
+// setup --check on a home with no parts section says aimux manages nothing, as JSON too, and exits 0; with a
+// section it cannot use, it lists the problems and exits non-zero without changing anything.
+func TestSetupCheckJSON(t *testing.T) {
+	home := t.TempDir()
+	cmd := exec.Command(binaryPath, "setup", "--check", "--json")
+	cmd.Env = append(os.Environ(), "HOME="+home)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("setup --check --json failed: %v\n%s", err, out)
+	}
+	var report struct {
+		Stated  bool              `json:"stated"`
+		Changes bool              `json:"changes"`
+		Plan    []json.RawMessage `json:"plan"`
+	}
+	if err := json.Unmarshal(out, &report); err != nil || report.Stated || report.Changes || report.Plan == nil || len(report.Plan) != 0 {
+		t.Fatalf("unexpected report (%v): %s", err, out)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".aimux"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(home, ".aimux", "config.yaml")
+	if err := os.WriteFile(config, []byte("parts:\n  inference-proxy:\n    port: 70000\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd = exec.Command(binaryPath, "setup", "--check")
+	cmd.Env = append(os.Environ(), "HOME="+home)
+	text, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(text), "line 3") || !strings.Contains(string(text), "enabled") {
+		t.Fatalf("setup --check with a broken section: %v\n%s", err, text)
+	}
+	if after, _ := os.ReadFile(config); string(after) != "parts:\n  inference-proxy:\n    port: 70000\n" { // #nosec G304 -- the test's own file
+		t.Error("a check changed the config file")
+	}
+	both := exec.Command(binaryPath, "setup", "--check", "--apply")
+	both.Env = append(os.Environ(), "HOME="+home)
+	if text, err := both.CombinedOutput(); err == nil || !strings.Contains(string(text), "give one") {
+		t.Fatalf("setup --check --apply: %v\n%s", err, text)
+	}
+}

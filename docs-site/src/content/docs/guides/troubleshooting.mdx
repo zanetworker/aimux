@@ -92,7 +92,7 @@ On a terminal it asks before each step (Enter is yes); `--yes` runs them without
 
 Then, only on a terminal and never with `--json`, it offers each tool that needs review: `Show diff and approve now? [y/N]` shows the diff, and a second yes to `Approve <set>/<tool>? [y/N]` pins it. Anything else, and end of input, is no. `--yes` never approves tools.
 
-It ends with six lines, one per concern (`sandbox`, `tools`, `router`, `browser`, `gateway`, `worker` for the tool gateway worker), each `✓` (fine), `!` (works, but needs attention) or `✗` (broken), and a `Next:` line on stderr for each problem. A second run with nothing missing changes nothing. Setup exits 1 only when a step failed.
+It ends with six lines, one per concern (`sandbox`, `tools`, `router`, `browser`, `gateway`, `worker` for the tool gateway worker), each `✓` (fine), `!` (works, but needs attention) or `✗` (broken), and a `Next:` line on stderr for each problem. A second run with nothing missing changes nothing. Plain `aimux setup` exits 1 only when a step failed. `aimux setup --check` is a different thing: it compares the services with the `parts:` section of the config file and exits 1 when `--apply` would change something ([guide](/guides/parts/)).
 
 `aimux setup --json` prints `{"schema_version", "steps": [{"name", "action", "output"}], "approved", "summary": [{"concern", "status", "detail", "next"}]}`; a step's action is `ran`, `pending`, `declined` or `failed`.
 

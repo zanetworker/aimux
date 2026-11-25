@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"slices"
 	"strconv"
@@ -271,6 +272,36 @@ func (f proxyFlags) args() []string {
 		}
 	}
 	return out
+}
+
+// ProxyPort is the port a model proxy started with args (the arguments after the program) listens on: its
+// --port, or fallback when it gives none.
+func ProxyPort(args []string, fallback int) int {
+	service := MustService("model-proxy")
+	_, flags, _, err := split(service, append([]string{"aimux"}, args...))
+	if err != nil || flags.port == "" {
+		return fallback
+	}
+	// As the proxy's own flag reads it: a number in any base it accepts.
+	port, err := strconv.ParseInt(flags.port, 0, 32)
+	if err != nil || port < 1 || port > 65535 {
+		return fallback
+	}
+	return int(port)
+}
+
+// InstalledProxyPort is the port the model proxy's job file at path starts it on, or fallback when the file is
+// not there, cannot be read, or gives none.
+func InstalledProxyPort(path string, fallback int) int {
+	file, err := os.ReadFile(path) // #nosec G304 -- a service's own job file
+	if err != nil {
+		return fallback
+	}
+	args, err := JobArgs(file)
+	if err != nil || len(args) < 2 {
+		return fallback
+	}
+	return ProxyPort(args[1:], fallback)
 }
 
 // WantedArgs is what the service's job should run, given what it runs now and what the settings state. A
