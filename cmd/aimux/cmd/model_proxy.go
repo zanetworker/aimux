@@ -14,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/zanetworker/aimux/internal/keyring"
+	"github.com/zanetworker/aimux/internal/ledger"
 	"github.com/zanetworker/aimux/internal/modelproxy"
 )
 
@@ -135,6 +136,32 @@ func newModelProxyServeCmd() *cobra.Command {
 					defer func() { _ = requests.Close() }()
 					handlerOptions = append(handlerOptions, modelproxy.WithRequestLog(requests))
 				}
+			}
+			// The ledger: one line per model call. Like the request history, a proxy that cannot keep it says so
+			// and serves on; unlike it, health then reports the record as off.
+			if home, err := os.UserHomeDir(); err == nil {
+				bound := port
+				if tcp, ok := ln.Addr().(*net.TCPAddr); ok {
+					bound = tcp.Port
+				}
+				dir, name := filepath.Join(home, ".aimux", "ledger"), modelproxy.LedgerName(bound)
+				if writer, err := ledger.OpenWriter(dir, name); err != nil {
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "model proxy: no ledger: %v\n", err)
+					handlerOptions = append(handlerOptions, modelproxy.WithLedgerOff())
+				} else {
+					defer func() { _ = writer.Close() }()
+					// Each session's turn number goes on from this writer's own earlier lines.
+					// Only the end of this writer's own file, so the proxy does not start slower as the file grows.
+					earlier, _, err := ledger.ReadTail(dir, name, 8<<20)
+					if err != nil {
+						// The numbers then start from what each request holds, which a compacted session's
+						// request no longer does in full.
+						_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "model proxy: turn numbers not read from the ledger: %v\n", err)
+					}
+					handlerOptions = append(handlerOptions, modelproxy.WithLedger(writer, earlier...))
+				}
+			} else {
+				handlerOptions = append(handlerOptions, modelproxy.WithLedgerOff())
 			}
 			if port == modelproxy.StablePort {
 				home, err := os.UserHomeDir()

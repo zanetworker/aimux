@@ -363,3 +363,25 @@ func probeClosedAddress(t *testing.T) string {
 	}
 	return addr
 }
+
+// A proxy that lost ledger lines, or has no ledger at all, still serves: it stays ok and says what is missing.
+func TestProbe_ModelProxyLedgerProblems(t *testing.T) {
+	for _, tc := range []struct {
+		live    modelproxy.Liveness
+		problem string
+	}{
+		{modelproxy.Liveness{LedgerSeq: 40, LedgerFailed: 3}, "3 ledger lines were not written"},
+		{modelproxy.Liveness{LedgerSeq: 40, LedgerFailed: 1}, "1 ledger line was not written"},
+		{modelproxy.Liveness{LedgerOff: true}, "the ledger is off"},
+	} {
+		tc.live.Service, tc.live.Status, tc.live.Version, tc.live.StartedAt = "aimux-model-proxy", "ok", probeTestBuild, probeTestStartedAt
+		addr := probeHTTPServer(t, probeJSON(t, "/healthz", "", http.StatusOK, tc.live))
+		env := statusEnv{modelAddr: addr, plistDir: t.TempDir()}
+		assertProbeRow(t, env, controller.ServiceStatus{
+			Name: "model proxy", State: controller.ServiceOK, Build: probeTestBuild,
+			Address: addr, StartedAt: &probeTestStartedAt, ActivityNote: "turn",
+			RestartFix: "aimux upgrade model-proxy",
+			Attention:  []controller.Attention{{Problem: tc.problem, Fix: "aimux model proxy status"}},
+		})
+	}
+}

@@ -22,6 +22,15 @@ type Health struct {
 	// Probe counts the rate-limit reads behind the HUD's usage file. They cost no tokens, so on the stable proxy
 	// they are a standing check that the Codex login and app-server still answer.
 	Probe StageHealth `json:"codex_probe"`
+	// Ledger is the record this proxy writes of its model calls. Empty when it was given none.
+	Ledger LedgerHealth `json:"ledger"`
+}
+
+// LedgerHealth is how the proxy's ledger writer is doing.
+type LedgerHealth struct {
+	Seq    uint64 `json:"seq,omitempty"`    // the last line number handed out
+	Failed uint64 `json:"failed,omitempty"` // lines that could not be written
+	Off    bool   `json:"off,omitempty"`    // the file could not be opened at start
 }
 
 // CodexHealth describes the Codex side of the proxy.
@@ -134,6 +143,11 @@ type Liveness struct {
 	Version   string     `json:"version,omitempty"`
 	StartedAt time.Time  `json:"started_at"`
 	LastOKAt  *time.Time `json:"last_ok_at,omitempty"` // last successful turn
+	// The ledger this proxy writes: the last line number it handed out, how many lines it could not write, and
+	// whether the file could not be opened at start. Counts only, like the rest of this answer.
+	LedgerSeq    uint64 `json:"ledger_seq,omitempty"`
+	LedgerFailed uint64 `json:"ledger_failed,omitempty"`
+	LedgerOff    bool   `json:"ledger_off,omitempty"`
 }
 
 // liveness keeps only the fields Liveness allows from a full health report.

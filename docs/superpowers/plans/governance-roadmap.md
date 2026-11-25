@@ -39,7 +39,7 @@ Three things hold on the way there:
 |---|---|
 | In progress | Stage 1: the plan is written (`2026-11-25-stage-1-ledger.md`) and waits for the owner's review |
 | Next | Stage 2: the entry wrapper, the parts menu, generated job files |
-| Waiting on the owner | His review of the stage 1 plan; see "Waiting on the owner" |
+| Waiting on the owner | To promote the model proxy once the ledger change is merged; see "Waiting on the owner" |
 
 ## Stages
 
@@ -48,7 +48,7 @@ A stage is done when its "done when" line is true on the owner's machine, not wh
 | Stage | Delivers | Done when | Roadmap items | State |
 |---|---|---|---|---|
 | 0. Land what is waiting | Promote survives a cold start; `aimux upgrade`; the MCP proxy on its own copy; the two flaky tests | A promote has passed with the retry in place; `aimux upgrade` has moved the live model proxy, collector and MCP proxy, so `aimux status` shows no service running `~/go/bin/aimux` and a `go install` changes none; a broken build has been rolled back once on purpose; both flaky tests pass 20 runs in a row | Small work below | In progress: everything is built and the three services are moved. Two parts of its "done when" are not yet true: no promote has run since the retry was added, and a rollback has only been seen on a test job |
-| 1. One record | Ledger files written by the model proxy; a reader; a first meter | `aimux cost` shows requests and tokens per session and model for a day of real use, and its totals match `aimux model proxy stats` | Slice 1 | In progress. Plan: `2026-11-25-stage-1-ledger.md`. Built: the line schema, the writer and the reader ([#138](https://github.com/zanetworker/aimux/pull/138)); what identifies a turn, from real requests (task 1) |
+| 1. One record | Ledger files written by the model proxy; a reader; a first meter | `aimux cost` shows requests and tokens per session and model for a day of real use, and its totals match `aimux model proxy stats` | Slice 1 | In progress. Plan: `2026-11-25-stage-1-ledger.md`. Built: the line schema, the writer and the reader ([#138](https://github.com/zanetworker/aimux/pull/138)); what identifies a turn ([#139](https://github.com/zanetworker/aimux/pull/139)); the model proxy writing a line per model call, which waits for the owner to promote it. Left: `aimux cost`, and a day of real use |
 | 2. One way in, and identity | The entry wrapper behind `claude-codex`; the registry of parts; the parts menu in `aimux setup`; `enable`, `disable`; job files generated from the registry | A background call carries its session in the ledger; the model proxy's job file is one aimux wrote | Slice 2, base items B1 and B3 | Not started |
 | 3. A second engine, by choice | Anthropic passthrough and a sandbox entrance; switching model by hand in a session | A Claude session routed through the proxy runs a streamed tool call on Anthropic, then continues on Codex | Slice 8a | Not started. Waits on the sandbox half of 0a |
 | 4. The right model per task | Roles mapped to engines; fallback on a limit error | A helper runs on another engine than its main conversation without being told to, and the ledger shows both | Slices 8b, 8c | Not started |
@@ -164,7 +164,7 @@ Base items from the product-shape draft: B1 the registry of parts, B2 the servic
 
 ## Waiting on the owner
 
-1. To review the stage 1 plan (`2026-11-25-stage-1-ledger.md`) and say how it should be built. Task 1 of it needs a few minutes of his Claude Code session on the dev proxy.
+1. To promote the model proxy (`scripts/model-proxy-promote promote`, or `aimux upgrade model-proxy`) once the change that makes it write the ledger is merged. Until then nothing is recorded. It is also the first promote since the retry was added, which closes one open part of stage 0.
 2. Whether evals resume right after stage 1 for the parts that need only the turn id.
 3. Whether the hook may ever refuse a tool call. Slice 3 is report-only whatever the answer.
 4. Whether there is a source for Claude's remaining allowance. Without one the limit error is the only trigger.

@@ -46,6 +46,7 @@ type Line struct {
 
 	Harness string `json:"aimux.harness,omitempty"` // "claude-code", "codex"
 	Side    bool   `json:"aimux.side,omitempty"`    // off the session's main conversation: a subagent or background call
+	Agent   string `json:"aimux.agent,omitempty"`   // the subagent's id, as the harness names it
 
 	// A model call.
 	RequestModel  string `json:"gen_ai.request.model,omitempty"`  // the model the client named

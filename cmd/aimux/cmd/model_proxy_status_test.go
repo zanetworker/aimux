@@ -165,3 +165,20 @@ func TestModelProxyServeRejectsAnUnknownServiceTier(t *testing.T) {
 		t.Fatalf("err = %v, want it to name the two tiers", err)
 	}
 }
+
+func TestLedgerLine(t *testing.T) {
+	for _, tc := range []struct {
+		ledger modelproxy.LedgerHealth
+		want   string
+	}{
+		{modelproxy.LedgerHealth{}, ""},
+		{modelproxy.LedgerHealth{Seq: 1}, "latest line 1"},
+		{modelproxy.LedgerHealth{Seq: 1840}, "latest line 1840"},
+		{modelproxy.LedgerHealth{Seq: 1840, Failed: 3}, "latest line 1840, 3 not written"},
+		{modelproxy.LedgerHealth{Off: true}, "off: the ledger file could not be opened at start (see the proxy's log); model calls are not recorded"},
+	} {
+		if got := ledgerLine(tc.ledger); got != tc.want {
+			t.Errorf("ledgerLine(%+v) = %q, want %q", tc.ledger, got, tc.want)
+		}
+	}
+}

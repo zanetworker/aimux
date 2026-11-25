@@ -88,7 +88,24 @@ func writeHealthTable(out io.Writer, addr string, health modelproxy.Health, now 
 	_, _ = fmt.Fprintf(table, "Codex\t%s\t%s\n", codex, health.Codex.Command)
 	_, _ = fmt.Fprintf(table, "Requests\t\t%s\n", stageLine(health.Requests, "turn", now))
 	_, _ = fmt.Fprintf(table, "Codex check\t\t%s\n", stageLine(health.Probe, "read", now))
+	if line := ledgerLine(health.Ledger); line != "" {
+		_, _ = fmt.Fprintf(table, "Ledger\t\t%s\n", line)
+	}
 	_ = table.Flush()
+}
+
+// ledgerLine says how the proxy's record of its model calls is doing; empty for a proxy that keeps none.
+func ledgerLine(l modelproxy.LedgerHealth) string {
+	switch {
+	case l.Off:
+		return "off: the ledger file could not be opened at start (see the proxy's log); model calls are not recorded"
+	case l.Seq == 0:
+		return ""
+	case l.Failed > 0:
+		return fmt.Sprintf("latest line %d, %d not written", l.Seq, l.Failed)
+	default:
+		return fmt.Sprintf("latest line %d", l.Seq)
+	}
 }
 
 // stageLine reads as a sentence: how much work (unit is its singular), how much of it failed, and how long ago
