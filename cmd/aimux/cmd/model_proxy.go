@@ -13,10 +13,13 @@ import (
 	"syscall"
 	"time"
 
+	"encoding/json"
 	"github.com/spf13/cobra"
 	"github.com/zanetworker/aimux/internal/keyring"
 	"github.com/zanetworker/aimux/internal/ledger"
 	"github.com/zanetworker/aimux/internal/modelproxy"
+	"github.com/zanetworker/aimux/internal/secretref"
+	"io"
 )
 
 func newModelCmd() *cobra.Command {
@@ -25,6 +28,84 @@ func newModelCmd() *cobra.Command {
 	proxy.AddCommand(newModelProxyServeCmd(), newModelProxyStatusCmd(), newModelProxyStatsCmd(), newModelProxyEnvCmd())
 	model.AddCommand(proxy)
 	return model
+}
+
+// messagesUpstream is one --messages-upstream with where its key is kept.
+type messagesUpstream struct {
+	name, address string
+	ref           *secretref.Ref // nil: the secret-store entry <name>-key
+}
+
+// parseMessagesUpstreams reads the two repeated flags. A name given twice, a key for a name that is not an
+// upstream, and a reference that is not one are refused before anything starts.
+func parseMessagesUpstreams(pairs, keys []string) ([]messagesUpstream, error) {
+	var upstreams []messagesUpstream
+	index := map[string]int{}
+	for _, pair := range pairs {
+		name, address, ok := strings.Cut(pair, "=")
+		if !ok {
+			return nil, fmt.Errorf("--messages-upstream %q: give it as name=address, for example enmaas=https://gateway.example", pair)
+		}
+		if _, twice := index[name]; twice {
+			// One name is one key; two addresses under it would share it.
+			return nil, fmt.Errorf("--messages-upstream: the name %q is given twice", name)
+		}
+		index[name] = len(upstreams)
+		upstreams = append(upstreams, messagesUpstream{name: name, address: address})
+	}
+	for _, pair := range keys {
+		name, text, ok := strings.Cut(pair, "=")
+		at, known := index[name]
+		if !ok || !known {
+			return nil, fmt.Errorf("--messages-upstream-key: give it as name=reference, for a name that --messages-upstream also gives")
+		}
+		var ref secretref.Ref
+		decoder := json.NewDecoder(strings.NewReader(text))
+		decoder.DisallowUnknownFields()
+		// What follows the name may be a key pasted by mistake, so it is never repeated in the error.
+		var extra json.RawMessage
+		if decoder.Decode(&ref) != nil || ref.Validate() != nil || !errors.Is(decoder.Decode(&extra), io.EOF) {
+			return nil, fmt.Errorf(`--messages-upstream-key for %s: this says where the key is kept, never the key itself, for example {"keychain":{"item":"%s-key"}}`, name, name)
+		}
+		if upstreams[at].ref != nil {
+			return nil, fmt.Errorf("--messages-upstream-key: the name %q is given twice", name)
+		}
+		upstreams[at].ref = &ref
+	}
+	return upstreams, nil
+}
+
+// key reads the upstream's key when a request needs it. Each read is a fresh one: the proxy keeps the key for a
+// minute itself and asks again when the upstream refuses it, so nothing here may answer from a cache of its own,
+// and no key that was rotated away stays in memory.
+func (u messagesUpstream) key() func(context.Context) (string, error) {
+	if u.ref == nil {
+		return keyring.System(u.name + "-key").Lookup
+	}
+	return func(ctx context.Context) (string, error) {
+		secrets := secretref.NewResolver(secretref.Options{})
+		values, err := secrets.Resolve(ctx, u.name, secretref.Refs{Headers: map[string]secretref.Ref{"x-api-key": *u.ref}})
+		if err != nil {
+			return "", err
+		}
+		return values.Headers["x-api-key"], nil
+	}
+}
+
+// keyAt says where the key is kept, in words; empty for the default entry.
+func (u messagesUpstream) keyAt() string {
+	switch {
+	case u.ref == nil:
+		return ""
+	case u.ref.Keychain != nil:
+		return "the secret-store entry " + u.ref.Keychain.Item
+	case u.ref.Env != nil:
+		return "the environment variable " + u.ref.Env.Name
+	case u.ref.File != nil:
+		return "the file " + u.ref.File.Path
+	default:
+		return "the command that prints it"
+	}
 }
 
 func newModelProxyStatusCmd() *cobra.Command {
@@ -88,7 +169,7 @@ func newModelProxyServeCmd() *cobra.Command {
 	var port int
 	var command, serviceTier string
 	var anthropic bool
-	var messagesUpstreams []string
+	var messagesUpstreams, messagesUpstreamKeys []string
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Serve the Codex model proxy on 127.0.0.1",
@@ -173,19 +254,12 @@ func newModelProxyServeCmd() *cobra.Command {
 				}
 				handlerOptions = append(handlerOptions, option)
 			}
-			namedUpstreams := map[string]bool{}
-			for _, pair := range messagesUpstreams {
-				name, address, ok := strings.Cut(pair, "=")
-				if !ok {
-					return fmt.Errorf("--messages-upstream %q: give it as name=address, for example enmaas=https://gateway.example", pair)
-				}
-				if namedUpstreams[name] {
-					// One name is one secret-store entry; two addresses under it would share a key.
-					return fmt.Errorf("--messages-upstream: the name %q is given twice", name)
-				}
-				namedUpstreams[name] = true
-				// Its key is read from the secret store when a request needs it, from the entry <name>-key.
-				option, err := modelproxy.WithMessagesUpstream(name, address, keyring.System(name+"-key").Lookup)
+			upstreams, err := parseMessagesUpstreams(messagesUpstreams, messagesUpstreamKeys)
+			if err != nil {
+				return err
+			}
+			for _, upstream := range upstreams {
+				option, err := modelproxy.WithMessagesUpstream(upstream.name, upstream.address, upstream.key(), upstream.keyAt())
 				if err != nil {
 					return err
 				}
@@ -215,9 +289,11 @@ func newModelProxyServeCmd() *cobra.Command {
 	cmd.Flags().IntVar(&port, "port", modelproxy.StablePort, "Port on 127.0.0.1 (clients send the key stored in the "+modelproxy.KeyService+" Keychain entry)")
 	cmd.Flags().StringVar(&command, "codex-command", "", "Codex executable (default: codex-lean if available, otherwise codex)")
 	cmd.Flags().BoolVar(&anthropic, "anthropic", false,
-		"Also forward to Anthropic: a request that carries the caller's own Claude login and names a plain model (not codex:<model>, not <name>:<model> for a --messages-upstream) goes to "+modelproxy.AnthropicUpstream+" unchanged. Requests with only the proxy key are answered by Codex as before, or by a --messages-upstream when they name one")
+		"Also forward to Anthropic: a request that carries the caller's own Claude login and names a plain model (not codex:<model>, not <name>:<model> for a --messages-upstream) goes to "+modelproxy.AnthropicUpstream+" unchanged. Requests with only the proxy key and a plain model name are answered by Codex as before, or by a --messages-upstream when they name one. A model named with a prefix that is not an engine that is on is refused with HTTP 400")
 	cmd.Flags().StringArrayVar(&messagesUpstreams, "messages-upstream", nil,
-		"Another address that speaks the Messages API, as name=address (may be repeated). A request naming a model as <name>:<model> with the proxy key is sent there with the key from the secret-store entry <name>-key, and with none of the caller's credentials")
+		"Another address that speaks the Messages API, as name=address (may be repeated). A request naming a model as <name>:<model> with the proxy key is sent there, with that upstream's key and none of the caller's credentials. The key is read from the secret-store entry <name>-key unless --messages-upstream-key says where else it is kept. A plain model name, with no prefix, still goes to Codex or Anthropic")
+	cmd.Flags().StringArrayVar(&messagesUpstreamKeys, "messages-upstream-key", nil,
+		`Where a --messages-upstream's key is kept, as name=reference, when it is not the secret-store entry <name>-key. The reference is the JSON form the config file's key takes, such as enmaas={"env":{"name":"ENMAAS_KEY"}}; it is never the key itself`)
 	cmd.Flags().StringVar(&serviceTier, "service-tier", modelproxy.ServiceTierPriority,
 		"OpenAI service tier: priority is Codex's Fast tier (about twice the tokens a second, spending the plan's allowance faster); standard leaves Codex's own default")
 	return cmd

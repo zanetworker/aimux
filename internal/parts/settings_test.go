@@ -3,6 +3,7 @@ package parts
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -190,5 +191,36 @@ func TestLoad_NotYAML(t *testing.T) {
 	s, err := Load(writeConfig(t, "parts:\n  inference-proxy:\n    enabled: true\n    engines:\n"))
 	if err != nil || s.Parts["inference-proxy"].Engines == nil || len(s.Validate()) != 0 {
 		t.Errorf("engines with nothing under it: %+v, %v", s.Parts["inference-proxy"], err)
+	}
+}
+
+func TestProxyArgs(t *testing.T) {
+	load := func(text string) PartSettings {
+		s, err := Parse([]byte(text))
+		if err != nil || len(s.Validate()) != 0 {
+			t.Fatalf("%v %v", err, s.Validate())
+		}
+		return s.Parts["inference-proxy"]
+	}
+	for name, tc := range map[string]struct {
+		yaml string
+		want []string
+	}{
+		"only switched on: nothing of its own is stated": {"parts:\n  inference-proxy:\n    enabled: true\n", nil},
+		"engines with nothing under them":                {"parts:\n  inference-proxy:\n    enabled: true\n    engines:\n", nil},
+		"anthropic on":                                   {"parts:\n  inference-proxy:\n    enabled: true\n    engines:\n      anthropic: {}\n", []string{"--anthropic"}},
+		"anthropic off":                                  {"parts:\n  inference-proxy:\n    enabled: true\n    engines:\n      anthropic: {enabled: false}\n", nil},
+		"everything": {fullConfig, []string{"--port", "7400", "--service-tier", "standard", "--codex-command", "codex-lean", "--anthropic",
+			"--messages-upstream", "enmaas=https://api.enmaas.devshift.net", "--messages-upstream-key", `enmaas={"keychain":{"item":"enmaas-key"}}`}},
+	} {
+		if got := load(tc.yaml).ProxyArgs(); !slices.Equal(got, tc.want) {
+			t.Errorf("%s:\ngot  %q\nwant %q", name, got, tc.want)
+		}
+	}
+	// The same settings give the same arguments in the same order, whatever order the file lists engines in.
+	a := load("parts:\n  inference-proxy:\n    enabled: true\n    engines:\n      zeta: {type: messages, url: https://z.example}\n      alpha: {type: messages, url: https://a.example}\n").ProxyArgs()
+	b := load("parts:\n  inference-proxy:\n    enabled: true\n    engines:\n      alpha: {type: messages, url: https://a.example}\n      zeta: {type: messages, url: https://z.example}\n").ProxyArgs()
+	if !slices.Equal(a, b) || len(a) != 4 || a[1] != "alpha=https://a.example" {
+		t.Errorf("order: %q and %q", a, b)
 	}
 }
