@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -39,12 +40,60 @@ func SessionEnv(port int, key string) []string {
 	return []string{
 		fmt.Sprintf("export ANTHROPIC_BASE_URL='http://127.0.0.1:%d%s%s'", port, keyPathPrefix, url.PathEscape(key)),
 		"unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN",
+		"export " + SessionEnvMarker + "='" + SessionEnvEngines + "'",
 	}
 }
 
-// SessionEnvOff undoes SessionEnv: the one variable that held the proxy key is unset, so a shell that goes back
-// to Anthropic directly cannot send the key there.
-func SessionEnvOff() []string { return []string{"unset ANTHROPIC_BASE_URL"} }
+// SessionEnvMarker is a variable the lines set to say which form set the shell. Undoing reads it, so what has to
+// be unset is known without reading the proxy key again: a secret store that is locked at that moment must not
+// leave the key behind in a shell that no longer points at the proxy.
+const (
+	SessionEnvMarker  = "AIMUX_MODEL_PROXY_ENV"
+	SessionEnvEngines = "engines" // SessionEnv: the key is in the base URL
+	SessionEnvCodexed = "codex"   // SessionEnvCodex: the key is the API key, and the model is pinned
+)
+
+// codexModelName is a Codex model as it may be written into a shell line.
+var codexModelName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+
+// SessionEnvCodex is the shell lines that point Claude Code sessions started from that shell at the proxy on port
+// for Codex alone, as the proxy has been used from the start: the proxy key is the API key, so no Claude login
+// is involved, and the model is pinned to codex:<model>. It needs no second engine on the proxy.
+func SessionEnvCodex(port int, key, model string) ([]string, error) {
+	if !codexModelName.MatchString(model) {
+		return nil, errors.New("a Codex model is named with letters, digits, dots and hyphens, for example gpt-6.2-sol")
+	}
+	return []string{
+		fmt.Sprintf("export ANTHROPIC_BASE_URL='http://127.0.0.1:%d'", port),
+		"export ANTHROPIC_API_KEY=" + shellQuote(key),
+		"export ANTHROPIC_MODEL='codex:" + model + "'",
+		"unset ANTHROPIC_AUTH_TOKEN",
+		"export " + SessionEnvMarker + "='" + SessionEnvCodexed + "'",
+	}, nil
+}
+
+// ValidCodexModel reports whether model is a Codex model's name as SessionEnvCodex accepts it.
+func ValidCodexModel(model string) bool { return codexModelName.MatchString(model) }
+
+// shellQuote is text inside single quotes for a POSIX shell.
+func shellQuote(text string) string {
+	return "'" + strings.ReplaceAll(text, "'", `'\''`) + "'"
+}
+
+// SessionEnvOff undoes SessionEnv and SessionEnvCodex. marker is what SessionEnvMarker holds in the shell. The
+// base URL and the marker always go. The API key variable and the model go when the marker says the Codex form
+// set them. apiKeyIsProxyKey covers a shell set before the marker existed: its API key variable goes when it is
+// known to hold the proxy key. A key or a model of the owner's own stays.
+func SessionEnvOff(marker string, apiKeyIsProxyKey bool) []string {
+	names := "unset ANTHROPIC_BASE_URL " + SessionEnvMarker
+	if marker == SessionEnvCodexed || apiKeyIsProxyKey {
+		names += " ANTHROPIC_API_KEY"
+	}
+	if marker == SessionEnvCodexed {
+		names += " ANTHROPIC_MODEL"
+	}
+	return []string{names}
+}
 
 // credentials is what a request carried, read once. It holds no credential, only which were present.
 type credentials struct {

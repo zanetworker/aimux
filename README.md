@@ -103,7 +103,7 @@ Use the Claude Code or Codex built-in history instead if you run one agent at a 
 | Export a trace | `aimux export <session-id>` |
 | Follow Claude sessions from your phone | `aimux remote serve` (via tailscale serve) |
 | Share MCP servers across sessions | `aimux mcp proxy install --dry-run`, then `aimux mcp proxy install` |
-| Run Claude Code on Codex (ChatGPT plan, no Claude quota) | `aimux model proxy serve`, then point Claude Code at `http://127.0.0.1:7385` with the key from the `aimux-model-proxy` Keychain item and a `codex:<model>` model |
+| Run Claude Code on Codex (ChatGPT plan, no Claude quota) | `aimux model proxy serve`, then in the shell you start sessions from: `lines="$(aimux model proxy env --codex)" && eval "$lines"` (the proxy's address, its key and a `codex:<model>` model, `gpt-6.2-sol` unless you name one); `eval "$(aimux model proxy env --off)"` undoes it |
 | Set up the Wingman side panel | `aimux browser install --extension-id <id>`, `aimux browser setup`, `aimux tools approve <set>...`, `aimux mcp proxy gateway install`, `aimux sandbox verify`, `aimux sandbox status` |
 | Review the tools a profile may call | `aimux tools status`, `aimux tools diff`, `aimux tools approve`; add or remove a source with `aimux tools add notes --folder <dir>`, `aimux tools add mcp ...`, `aimux tools add cli gh`, `aimux tools add http --spec ... --base-url ...`, `aimux tools remove <source>` (with `servers.yaml`, edit it and `tool-sets.yaml` instead; see [Servers](https://aimux.ai/guides/servers/)) |
 | Define servers and their secrets | `aimux servers discover <name> --cwd <dir>` (the variables a server reads, with a suggested reference each), `aimux servers migrate` (split `tool-sources.yaml` into `servers.yaml` and `tool-sets.yaml`) |

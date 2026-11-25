@@ -10,6 +10,9 @@ import (
 
 const defaultModel = "gpt-6.2-sol"
 
+// DefaultCodexModel is the Codex model a session gets when it names none.
+const DefaultCodexModel = defaultModel
+
 type conversationMessage struct {
 	Role    string          `json:"role"`
 	Content json.RawMessage `json:"content"`

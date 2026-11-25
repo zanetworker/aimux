@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -512,12 +513,34 @@ func TestHealthz_NamesTheEngines(t *testing.T) {
 
 func TestSessionEnv(t *testing.T) {
 	got := SessionEnv(7385, "it's/a key")
-	want := []string{`export ANTHROPIC_BASE_URL='http://127.0.0.1:7385/k/it%27s%2Fa%20key'`, "unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN"}
-	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+	want := []string{`export ANTHROPIC_BASE_URL='http://127.0.0.1:7385/k/it%27s%2Fa%20key'`, "unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN", "export AIMUX_MODEL_PROXY_ENV='engines'"}
+	if !slices.Equal(got, want) {
 		t.Errorf("SessionEnv = %q, want %q", got, want)
 	}
-	if off := SessionEnvOff(); len(off) != 1 || off[0] != "unset ANTHROPIC_BASE_URL" {
-		t.Errorf("SessionEnvOff = %q", off)
+	for _, tc := range []struct {
+		marker string
+		key    bool
+		want   string
+	}{
+		{"", false, "unset ANTHROPIC_BASE_URL AIMUX_MODEL_PROXY_ENV"},
+		{"engines", false, "unset ANTHROPIC_BASE_URL AIMUX_MODEL_PROXY_ENV"},
+		{"codex", false, "unset ANTHROPIC_BASE_URL AIMUX_MODEL_PROXY_ENV ANTHROPIC_API_KEY ANTHROPIC_MODEL"},
+		{"", true, "unset ANTHROPIC_BASE_URL AIMUX_MODEL_PROXY_ENV ANTHROPIC_API_KEY"},
+		{"something-else", false, "unset ANTHROPIC_BASE_URL AIMUX_MODEL_PROXY_ENV"},
+	} {
+		if off := SessionEnvOff(tc.marker, tc.key); len(off) != 1 || off[0] != tc.want {
+			t.Errorf("SessionEnvOff(%q, %v) = %q", tc.marker, tc.key, off)
+		}
+	}
+	codex, err := SessionEnvCodex(7385, "it's a key", "gpt-6.2-sol")
+	wantCodex := []string{"export ANTHROPIC_BASE_URL='http://127.0.0.1:7385'", `export ANTHROPIC_API_KEY='it'\''s a key'`, "export ANTHROPIC_MODEL='codex:gpt-6.2-sol'", "unset ANTHROPIC_AUTH_TOKEN", "export AIMUX_MODEL_PROXY_ENV='codex'"}
+	if err != nil || !slices.Equal(codex, wantCodex) {
+		t.Errorf("SessionEnvCodex = %q, %v", codex, err)
+	}
+	for _, model := range []string{"", "gpt 6", "x'; rm -rf ~; '", "codex:gpt-6.2-sol", "$(whoami)"} {
+		if _, err := SessionEnvCodex(7385, "k", model); err == nil {
+			t.Errorf("SessionEnvCodex accepted the model %q", model)
+		}
 	}
 }
 

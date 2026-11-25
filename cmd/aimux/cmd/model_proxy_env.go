@@ -1,12 +1,14 @@
 package cmd
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,10 +19,9 @@ import (
 )
 
 func newModelProxyEnvCmd() *cobra.Command {
-	var port int
-	var off bool
+	var o envOpts
 	cmd := &cobra.Command{
-		Use:   "env",
+		Use:   "env [codex-model]",
 		Short: "Print the shell lines that send this shell's Claude Code sessions through the model proxy",
 		Long: "Prints lines for eval. After\n\n  eval \"$(aimux model proxy env)\"\n\n" +
 			"Claude Code sessions started from that shell go through the model proxy: a Claude model is answered by " +
@@ -31,26 +32,72 @@ func newModelProxyEnvCmd() *cobra.Command {
 			"tracing on (set -x) would print it. When this command fails it prints nothing, and eval of nothing " +
 			"succeeds, so in a script use: lines=\"$(aimux model proxy env)\" && eval \"$lines\".\n\n" +
 			"Before printing, it asks whatever listens on the port to prove it holds the proxy key, without sending the key. " +
-			"eval \"$(aimux model proxy env --off)\" undoes it, and needs no proxy.",
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+			"eval \"$(aimux model proxy env --off)\" undoes it, and needs no proxy.\n\n" +
+			"With --codex the shell is set for Codex alone, as the proxy has always been used: the proxy key is the API\n" +
+			"key, no Claude login is involved, and the model is pinned to codex:<model> (gpt-6.2-sol unless one is\n" +
+			"named: aimux model proxy env --codex gpt-6.2-astra). That form needs no --anthropic on the proxy.",
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
-			if file, ok := cmd.OutOrStdout().(*os.File); ok && !off && isTerminal(file) {
-				return errors.New(`this prints the proxy key, so it is not shown on a terminal; run it as: eval "$(aimux model proxy env)"`)
+			// A port named in the shell stands when none is given here, as the function this replaces read it.
+			if named, err := strconv.Atoi(os.Getenv("AIMUX_MODEL_PROXY_PORT")); err == nil && named > 0 && named < 65536 && !cmd.Flags().Changed("port") {
+				o.port = named
 			}
-			return modelProxyEnv(cmd.Context(), port, off, keyring.Stored(modelproxy.KeyService).Lookup, os.Getenv, cmd.OutOrStdout(), cmd.ErrOrStderr())
+			if len(args) == 1 {
+				if !o.codex {
+					return errors.New("a model is named only with --codex; the other form leaves the model to the session")
+				}
+				o.model = args[0]
+			}
+			if file, ok := cmd.OutOrStdout().(*os.File); ok && !o.off && isTerminal(file) {
+				again := "aimux model proxy env"
+				if o.codex {
+					again += " --codex"
+				}
+				if o.model != "" && modelproxy.ValidCodexModel(o.model) {
+					again += " " + o.model
+				}
+				if cmd.Flags().Changed("port") {
+					again += fmt.Sprintf(" --port %d", o.port)
+				}
+				return fmt.Errorf(`this prints the proxy key, so it is not shown on a terminal; run it as: lines="$(%s)" && eval "$lines"`, again)
+			}
+			return modelProxyEnv(cmd.Context(), o, keyring.Stored(modelproxy.KeyService).Lookup, os.Getenv, cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 	}
-	cmd.Flags().IntVar(&port, "port", modelproxy.StablePort, "Port the proxy listens on at 127.0.0.1")
-	cmd.Flags().BoolVar(&off, "off", false, "Print the lines that undo it")
+	cmd.Flags().IntVar(&o.port, "port", modelproxy.StablePort, "Port the proxy listens on at 127.0.0.1 (AIMUX_MODEL_PROXY_PORT, when set, stands in for it)")
+	cmd.Flags().BoolVar(&o.off, "off", false, "Print the lines that undo it")
+	cmd.Flags().BoolVar(&o.codex, "codex", false, "Set the shell for Codex alone: the proxy key as the API key and the model pinned to codex:<model>")
 	return cmd
+}
+
+// envOpts is how `aimux model proxy env` was asked.
+type envOpts struct {
+	port  int
+	off   bool
+	codex bool   // Codex alone, with the model pinned
+	model string // the Codex model; the default when empty
 }
 
 // modelProxyEnv writes the lines to stdout and one sentence about them to stderr. Nothing reaches stdout unless
 // every check passed, so an eval of a failed run changes nothing; the key is written to stdout only.
-func modelProxyEnv(ctx context.Context, port int, off bool, key func(context.Context) (string, error), getenv func(string) string, stdout, stderr io.Writer) error {
-	if off {
-		_, err := fmt.Fprintln(stdout, strings.Join(modelproxy.SessionEnvOff(), "\n"))
+func modelProxyEnv(ctx context.Context, o envOpts, key func(context.Context) (string, error), getenv func(string) string, stdout, stderr io.Writer) error {
+	port := o.port
+	if o.off {
+		// What to unset is read from the marker the first form left in the shell, not from the proxy key. Only a
+		// shell set before there was a marker needs the key looked at, to tell whether its API key variable
+		// holds it; when that cannot be told, nothing is changed and the owner is told, so a shell is never left
+		// with the proxy key in it and the proxy's address gone.
+		marker := getenv(modelproxy.SessionEnvMarker)
+		held := false
+		if marker == "" && getenv("ANTHROPIC_API_KEY") != "" && strings.HasPrefix(getenv("ANTHROPIC_BASE_URL"), "http://127.0.0.1:") {
+			secret, err := key(ctx)
+			if err != nil || secret == "" {
+				return errors.New("this shell has ANTHROPIC_API_KEY set and points at a local proxy, and the proxy key cannot be read to tell whether that is it; unset ANTHROPIC_BASE_URL and ANTHROPIC_API_KEY yourself")
+			}
+			held = getenv("ANTHROPIC_API_KEY") == secret
+		}
+		_, err := fmt.Fprintln(stdout, strings.Join(modelproxy.SessionEnvOff(marker, held), "\n"))
 		return err
 	}
 	// With one of these set, Claude Code talks to that provider and never reads the base URL.
@@ -72,7 +119,9 @@ func modelProxyEnv(ctx context.Context, port int, off bool, key func(context.Con
 	defer cancel()
 	nonce := rand.Text()
 	live, err := challengeModelLiveness(probe, fmt.Sprintf("127.0.0.1:%d", port), nonce)
-	if err == nil {
+	if err == nil && o.codex {
+		err = modelproxy.CheckProxyIdentity(live, secret, nonce, port)
+	} else if err == nil {
 		err = modelproxy.CheckSessionProxy(live, secret, nonce, port)
 	}
 	switch {
@@ -82,7 +131,27 @@ func modelProxyEnv(ctx context.Context, port int, off bool, key func(context.Con
 	case err != nil:
 		return fmt.Errorf("nothing on port %d showed it is the model proxy (it does not answer, is an older build, or is another program); see: aimux model proxy status --port %d", port, port)
 	}
-	if _, err := fmt.Fprintln(stdout, strings.Join(modelproxy.SessionEnv(port, secret), "\n")); err != nil {
+	if o.codex {
+		lines, err := modelproxy.SessionEnvCodex(port, secret, cmp.Or(o.model, modelproxy.DefaultCodexModel))
+		if err != nil {
+			return err
+		}
+		// One chain: if the address cannot be set (a read-only variable), the key is not exported to wherever
+		// the old address points.
+		if _, err := fmt.Fprintln(stdout, strings.Join(lines, " &&\n")); err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(stderr, "Claude Code sessions started from this shell now run on Codex (%s) through the model proxy on port %d. "+
+			"Undo with: eval \"$(aimux model proxy env --off)\"\n", cmp.Or(o.model, modelproxy.DefaultCodexModel), port)
+		return nil
+	}
+	lines := modelproxy.SessionEnv(port, secret)
+	if getenv(modelproxy.SessionEnvMarker) == modelproxy.SessionEnvCodexed {
+		// The shell was set for Codex alone before: the model that form pinned goes, or a later session would
+		// ask Anthropic for a Codex model.
+		lines = append(lines, "unset ANTHROPIC_MODEL")
+	}
+	if _, err := fmt.Fprintln(stdout, strings.Join(lines, " &&\n")); err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintf(stderr, "Claude Code sessions started from this shell now go through the model proxy on port %d: "+

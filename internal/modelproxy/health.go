@@ -183,12 +183,22 @@ var (
 // proxy that holds key, listens on that port, and can answer with both engines. Only then may a session be pointed at it: the session will send it
 // the key, the owner's Claude login and every conversation.
 func CheckSessionProxy(live Liveness, key, nonce string, port int) error {
-	proven := key != "" && nonce != "" && hmac.Equal([]byte(live.Proof), []byte(LivenessProof(key, nonce, port)))
-	if live.Service != LivenessService || !proven {
-		return ErrNotTheProxy
+	if err := CheckProxyIdentity(live, key, nonce, port); err != nil {
+		return err
 	}
 	if !slices.Contains(live.Engines, engineAnthropic) {
 		return ErrNoAnthropicEngine
+	}
+	return nil
+}
+
+// CheckProxyIdentity reports whether live, the answer to a challenge with nonce sent to port, came from the model
+// proxy that holds key and listens on that port, whatever engines it has. A session that uses Codex alone needs
+// no more than this, and no less: it is about to be sent the key and every conversation.
+func CheckProxyIdentity(live Liveness, key, nonce string, port int) error {
+	proven := key != "" && nonce != "" && hmac.Equal([]byte(live.Proof), []byte(LivenessProof(key, nonce, port)))
+	if live.Service != LivenessService || !proven {
+		return ErrNotTheProxy
 	}
 	return nil
 }
