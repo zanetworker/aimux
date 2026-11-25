@@ -77,6 +77,8 @@ func TestJobArgs_RefusesWhatItCannotSplit(t *testing.T) {
 		"an argument not a string":                   strings.Replace(model, "<string>serve</string>", "<integer>5</integer>", 1),
 		"a comment in the list":                      strings.Replace(model, "<string>serve</string>", "<!-- note --><string>serve</string>", 1),
 		"not a job file":                             "hello",
+		"a CDATA section":          strings.Replace(model, "<string>/Users/someone</string>", "<string><![CDATA[<key>ProgramArguments</key>]]></string>", 1),
+		"a carriage return inside an argument": strings.Replace(model, "<string>serve</string>", "<string>ser\rve</string>", 1),
 		"a comment anywhere":                         strings.Replace(model, "<dict>", "<dict>\n\t<!-- <key>ProgramArguments</key><array><string>/old</string></array> -->", 1),
 		"the key a second time, in the environment":  strings.Replace(model, "<key>HOME</key>", "<key>ProgramArguments</key>\n\t\t<string>x</string>\n\t\t<key>HOME</key>", 1),
 		"Program spelled with a character reference": strings.Replace(model, "<key>ProgramArguments</key>", "<key>Pro&#103;ram</key>\n\t<string>/bin/x</string>\n\t<key>ProgramArguments</key>", 1),

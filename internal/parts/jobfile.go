@@ -21,6 +21,11 @@ var argumentString = regexp.MustCompile(`(?s)<string>(.*?)</string>|<string\s*/>
 
 // topKeys are the keys of the job file's top dictionary, read as XML reads them.
 func topKeys(plist []byte) ([]string, error) {
+	// Text that XML reads differently from how it is written is where a search on the text goes wrong: a CDATA
+	// section can hold what looks like the list, and a carriage return is not read back as one.
+	if bytes.Contains(plist, []byte("<![CDATA[")) || bytes.Contains(bytes.ReplaceAll(plist, []byte("\r\n"), nil), []byte("\r")) {
+		return nil, errors.New("the job file is written in a way aimux does not edit (a CDATA section, or a carriage return on its own); change the job by hand")
+	}
 	decoder := xml.NewDecoder(bytes.NewReader(plist))
 	var keys []string
 	depth := 0
