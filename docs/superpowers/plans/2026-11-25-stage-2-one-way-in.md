@@ -215,7 +215,7 @@ type JobChange struct {
 |---|---|---|---|
 | 1 | How an engine is turned on | Decided: `enable` and `disable` switch an engine that exists (`aimux engine enable anthropic`); `add` and `remove` are for a named upstream, which needs an address (`aimux engine add enmaas=<address>`) | A flag on `aimux enable inference-proxy`; fewer commands, harder to read back |
 | 2 | What aimux does with a job file that exists | Changes only the program and the arguments that come from the settings; keeps everything else; refuses a file it cannot split | Rewrites the whole file from the registry; one known shape, and it would drop anything set by hand (a port, `--codex-command`, the service's PATH) |
-| 3 | Who owns the shell function | The owner keeps `claude-codex`; its body becomes one line that calls aimux | aimux installs its own shell integration; one more thing that edits `~/.zshrc` |
+| 3 | Who owns the shell function | Decided: the owner keeps `claude-codex`; its body becomes one line that calls aimux | aimux installs its own shell integration; one more thing that edits `~/.zshrc` |
 
 ## Where a second opinion changed this plan
 
