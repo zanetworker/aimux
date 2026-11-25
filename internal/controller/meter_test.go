@@ -228,3 +228,20 @@ func TestMeter_CallsWithNoTokenFiguresAreSaid(t *testing.T) {
 		t.Fatalf("report = %+v; want one call without figures among two requests, and the switch line counted as neither", report)
 	}
 }
+
+func TestMeter_NamesTheEngines(t *testing.T) {
+	at := time.Now()
+	dir := meterLedger(t,
+		ledger.Line{Kind: ledger.KindModelCall, At: at, Session: "s1", ResponseModel: "claude-haiku-5-5", Engine: "anthropic", InputTokens: 10, Outcome: ledger.OutcomeOK},
+		ledger.Line{Kind: ledger.KindModelCall, At: at, Session: "s1", ResponseModel: "codex:gpt-6.2-sol", Engine: "codex", InputTokens: 20, Outcome: ledger.OutcomeOK},
+		ledger.Line{Kind: ledger.KindModelCall, At: at, Session: "s1", ResponseModel: "codex:gpt-6.2-sol", Engine: "codex", InputTokens: 20, Outcome: ledger.OutcomeOK},
+	)
+	bySession, err := Meter(dir, MeterOptions{})
+	if err != nil || len(bySession.Rows) != 1 || !slices.Equal(bySession.Rows[0].Engines, []string{"anthropic", "codex"}) {
+		t.Fatalf("by session: %v, %+v", err, bySession.Rows)
+	}
+	byModel, err := Meter(dir, MeterOptions{By: MeterByModel})
+	if err != nil || len(byModel.Rows) != 2 || byModel.Rows[0].Key != "codex:gpt-6.2-sol" || !slices.Equal(byModel.Rows[0].Engines, []string{"codex"}) || !slices.Equal(byModel.Rows[1].Engines, []string{"anthropic"}) {
+		t.Fatalf("by model: %v, %+v", err, byModel.Rows)
+	}
+}

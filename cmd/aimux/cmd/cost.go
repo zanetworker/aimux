@@ -116,13 +116,18 @@ func writeCost(out io.Writer, report controller.MeterReport, by controller.Meter
 			cells := []string{key, asked}
 			if served {
 				cells = append(cells, models)
+			} else {
+				cells = append(cells, costNames(r.Engines))
 			}
 			cells = append(cells, costNumbers(r)...)
 			_, _ = fmt.Fprintln(table, strings.Join(cells, "\t"))
 		}
+		// By model the row is the served model, so the column beside it names the engine that served it.
 		columns := []string{header, "ASKED AS"}
 		if served {
 			columns = append(columns, "SERVED")
+		} else {
+			columns = append(columns, "ENGINE")
 		}
 		_, _ = fmt.Fprintln(table, strings.Join(append(columns, "CALLS", "FAILED", "IN", "CACHED", "OUT", "COST"), "\t"))
 		for _, r := range report.Rows {
@@ -137,7 +142,7 @@ func writeCost(out io.Writer, report controller.MeterReport, by controller.Meter
 			}
 			row(printable(key), costAskedAs(r.Asked, models), costNames(r.Models), r)
 		}
-		_, _ = fmt.Fprintln(table, strings.Join(totalCells(served, report.Total), "\t"))
+		_, _ = fmt.Fprintln(table, strings.Join(totalCells(report.Total), "\t"))
 		_ = table.Flush()
 	}
 	var notes []string
@@ -185,12 +190,9 @@ func writeCost(out io.Writer, report controller.MeterReport, by controller.Meter
 }
 
 // totalCells is the last row: the sums, with nothing under the name columns.
-func totalCells(served bool, r controller.MeterRow) []string {
-	cells := []string{"total", ""}
-	if served {
-		cells = append(cells, "")
-	}
-	return append(cells, costNumbers(r)...)
+func totalCells(r controller.MeterRow) []string {
+	// Under the key, ASKED AS, and SERVED or ENGINE.
+	return append([]string{"total", "", ""}, costNumbers(r)...)
 }
 
 // costNumbers is a row's counts. Every token count of a row with estimated usage is marked, the cached one too.

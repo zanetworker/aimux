@@ -656,3 +656,10 @@ func TestNewSessionStartsTurnAfterSlowHistoryInjection(t *testing.T) {
 		t.Fatalf("expected the history injected and the turn started:\n%s", data)
 	}
 }
+
+func TestDescribeTailNamesOnlyPlainKinds(t *testing.T) {
+	tail := []inputMessage{{role: "assistant", blocks: []requestBlock{{Type: "text"}, {Type: "server_tool_use"}, {Type: "odd kind\x1b[31m"}, {Type: ""}}}}
+	if got, want := describeTail(tail, 1), "pending=1 tail=[assistant:text,server_tool_use,other,other]"; got != want {
+		t.Errorf("describeTail = %q, want %q", got, want)
+	}
+}

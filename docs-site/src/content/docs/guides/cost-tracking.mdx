@@ -56,9 +56,10 @@ total                                           217    3       ~42.1k  ~1.4M   ~
 | Column | Meaning |
 |---|---|
 | `SERVED` | The model that answered |
+| `ENGINE` | With `--by model`, in place of `SERVED`: the engine that served the row's model, `codex` or `anthropic`. In the JSON a row has `engines` when its calls named one; `total` and rows written before engines were recorded do not |
 | `ASKED AS` | The names the client used when they differ from it. A Claude model name answered by another engine shows here; `-` means it got what it asked for |
 | `CALLS`, `FAILED` | Model calls, and how many did not end in an answer |
-| `IN`, `CACHED`, `OUT` | Input tokens not read from a cache, input tokens read from a cache, output tokens. A leading `~` on a row's counts means the usage of some of its calls was estimated |
+| `IN`, `CACHED`, `OUT` | Input tokens not read from a cache (those written to one included), input tokens read from a cache, output tokens. A leading `~` on a row's counts means the usage of some of its calls was estimated |
 | `COST` | `unpriced`: the counts are real, prices are not applied yet |
 
 What it counts and what it does not:

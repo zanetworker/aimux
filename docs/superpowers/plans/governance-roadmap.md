@@ -37,7 +37,7 @@ Three things hold on the way there:
 
 | | |
 |---|---|
-| In progress | Stage 3: a second engine, by choice (plan: `2026-11-25-stage-3-second-engine.md`). Done: the key travels as a path prefix (task 1, `../specs/2026-11-25-second-engine-evidence.md`); the Anthropic engine (task 2); the proxy chooses the engine per request and writes `switch` lines, behind `aimux model proxy serve --anthropic`, off by default (task 3). On a spare port one real session ran a tool call on Anthropic, continued on Codex and went back, remembering across both. Left of task 3: the merged model list, the engine column in `aimux cost`, and one known limit to fix first: a conversation holding Anthropic server-tool blocks (a web search made on Anthropic) is refused by the Codex mapper when it continues on Codex. Then task 4, `aimux model proxy env` |
+| In progress | Stage 3: a second engine, by choice (plan: `2026-11-25-stage-3-second-engine.md`). Done: the key travels as a path prefix (task 1, `../specs/2026-11-25-second-engine-evidence.md`); the Anthropic engine (task 2); the proxy chooses the engine per request and writes `switch` lines, behind `aimux model proxy serve --anthropic`, off by default (task 3). On a spare port one real session ran a tool call on Anthropic, continued on Codex and went back, remembering across both. Task 3 is finished: `aimux cost --by model` names the engine, and a conversation holding blocks only Anthropic makes continues on Codex with a note in their place. Next: task 4, `aimux model proxy env` |
 | Also open | Stage 1 is built and recording; it closes after a day of real use (task 5 of `2026-11-25-stage-1-ledger.md`) |
 | Next | Stage 2 follows stage 3 |
 | Waiting on the owner | Nothing that blocks; see "Waiting on the owner" |
@@ -139,6 +139,7 @@ Base items from the product-shape draft: B1 the registry of parts, B2 the servic
 | 2026-11-25 | At most two pre-push review rounds per change, then it ships with the open findings listed, unless a P0 is open | `aimux upgrade` took six rounds; each found narrower cases and cost about eight minutes |
 | 2026-11-25 | Stage 3 (a second engine) is built before stage 2 (entry wrapper, parts menu) | The owner approved it: the two do not depend on each other, and the second engine changes what he can do each day |
 | 2026-11-25 | A session going to Anthropic presents the proxy key as a path prefix in its base URL, not as a custom header | The prefix arrived on every request of six real sessions; the header was missing from `HEAD /api/hello` |
+| 2026-11-25 | The merged model list (`GET /v1/models` answered with both engines' models) waits for the interactive check in stage 3's task 5 | No real session asked for the list in any captured run. With a login the request goes to Anthropic unchanged; if `/model` turns out to read the list from the proxy, it is built then |
 | 2026-11-25 | Pull requests stay small | The same change was 2,200 lines, which is what made each round slow |
 
 ## Paused or parked
