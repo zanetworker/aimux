@@ -1,5 +1,5 @@
 {
- "note": "A call the harness makes beside the conversation, under another model name: no session in the metadata, the session header only.",
+ "note": "A request with no session id in its metadata. Recorded from a request under a Claude model name, for which the proxy attached no session; whether its metadata held one was not recorded.",
  "metadata_session": false,
  "session_header": true,
  "agent_header": false,

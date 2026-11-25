@@ -149,7 +149,7 @@ Base items from the product-shape draft: B1 the registry of parts, B2 the servic
 
 1. The Claude login through a local address from inside a sandbox (0a, Wingman session).
 2. Whether an MCP request carries the harness's call id to the MCP proxy and the tool gateway (slice 4; not looked at in stage 1).
-13. That a background model call's session header names the conversation it belongs to. The header is present on every one seen; its value was not compared (stage 1, task 3: the ledger lines will show it).
+13. What the requests under a Claude model name are that Claude Code sent in one captured run (16 of 27) and in none of three later ones, and whether their metadata names their session. The ledger records the model asked for and the session on every line, so a day of real use will show them (stage 1, task 5).
 14. That a hook counting prompts in the transcript reaches the model proxy's turn number (slice 3). The rule is in `../specs/2026-11-25-turn-identity.md`.
 3. That Codex hooks receive a call id the model proxy also sees (slice 3).
 4. The cost of the reporting hook per tool call (slice 3).
