@@ -78,6 +78,7 @@ func partServices(home, version string, cfg config.Config) []controller.PartServ
 		}
 		services = append(services, controller.PartService{
 			Service: service, Dir: filepath.Join(home, ".aimux", "services", service.ID), Probe: probes[at], ProbeFor: probeFor, Hold: hold,
+			CLIBuild: version,
 			Job: launchdPartJob{job: launchdJob{agent: mcpproxy.Agent{
 				Label:     service.Label,
 				PlistPath: filepath.Join(home, "Library", "LaunchAgents", service.Label+".plist"),
@@ -245,7 +246,11 @@ func writePartsPlan(out io.Writer, configPath string, s parts.Settings, plan []c
 		_, _ = fmt.Fprintf(table, "%s\t%s\t%s\t%s\n", line.Part, parts.MustService(line.Service).Name, will, detail)
 	}
 	_ = table.Flush()
+	leftAlone := slices.ContainsFunc(plan, func(c controller.JobChange) bool { return c.Action == controller.ActionSkip })
 	switch {
+	case !pending && leftAlone:
+		// Not "nothing to change": the settings may ask for something that cannot be done as things are.
+		_, _ = fmt.Fprintln(out, "\nNothing can be changed as things are: see what is left alone, and why, above.")
 	case !pending:
 		_, _ = fmt.Fprintln(out, "\nNothing to change.")
 	case !applying:
