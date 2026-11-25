@@ -70,6 +70,37 @@ recorded in [the turn identity note](2026-11-25-turn-identity.md): a child sessi
 session inherits the proxy address and asks for its own default Claude model. That is a reading of the
 evidence, not a confirmed cause.
 
+## What the proxy adds to a request
+
+Measured three ways, once the engine existed.
+
+| Measure | Result |
+|---|---|
+| The proxy's own time, against a local stand-in for Anthropic (`BenchmarkAnthropicEngine_*`, 3,000 requests each, three runs) | About 0.04 ms per request direct and 0.13 ms through the proxy with the ledger on: **0.09 ms added** |
+| A trace of the proxy's upstream connection during real sessions, in a build made for the trace only | The connection to Anthropic is opened once (44 ms) and reused after that. Sending the request body takes 40 to 110 ms. The first byte of the answer arrives 0.97 to 2.1 s after the request starts, and that wait is Anthropic's |
+| Real `claude -p` turns on `claude-haiku-5-5`, direct and through a proxy on the dev port, taking turns, API time as Claude Code reports it | Fully cached prompts: 949 and 1,285 ms direct (2 turns), 989 to 1,185 ms through the proxy (5 turns). Prompts that wrote about 27,000 tokens to the cache: median 1,061 ms direct (6 turns), 1,401 ms through the proxy (5 turns) |
+
+Two things follow.
+
+**The proxy's own cost is far inside the design's bound of about 33 ms.** Nothing in the trace takes longer in the
+proxy than a tenth of a millisecond besides the network steps a direct session makes too.
+
+**The real-turn comparison does not show that, and does not contradict it.** The spread of Anthropic's own
+time to first byte in these samples is over a second, the samples are six or seven turns, and the one gap that
+appears (prompts that write to the cache) has no step in the trace to account for it. The plan asked for twenty
+turns each way. Fewer were run because, on this machine, every session that ends starts a second one on
+`claude-sonnet-5-5` that sends about 66,000 tokens, 50,000 of them written to the cache, so each measured turn
+cost a second, larger one.
+
+One thing was found and fixed while measuring. Claude Code opens a session with `HEAD /api/hello`, which opens
+its connection to Anthropic before the first prompt. The proxy answered that request itself, so its own
+connection was opened by the first prompt instead. It now asks Anthropic the same when the session presents the
+key in its base URL: a request of its own, with the client's name and nothing else the caller sent.
+
+Token counts were the same either way: 57,234 input tokens direct against about 56,250 through the proxy, with
+the same split between cached and written. The thousand-token difference means Claude Code builds a slightly
+different request when it has a base URL; what differs was not looked at.
+
 ## Confirmed, and not
 
 | Statement | Status |

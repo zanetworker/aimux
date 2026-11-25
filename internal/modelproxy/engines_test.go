@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zanetworker/aimux/internal/ledger"
 )
@@ -591,5 +592,102 @@ func TestCheckSessionProxy(t *testing.T) {
 	}
 	if err := CheckSessionProxy(good, "", "n", 7385); !errors.Is(err, ErrNotTheProxy) {
 		t.Error("an empty key proves nothing")
+	}
+}
+
+// Claude Code opens every session with HEAD /api/hello, which carries no login. Sent on, it opens the proxy's
+// connection to Anthropic before the first prompt, as it would have opened the client's own.
+func TestHandler_AKeyedSessionsHelloWarmsTheUpstream(t *testing.T) {
+	p := newTwoEngines(t)
+	req := httptest.NewRequest(http.MethodHead, "/k/"+testKey+"/api/hello?x=1", nil)
+	req.Header.Set("User-Agent", "claude-cli/2.1.332")
+	req.Header.Set("Cookie", "session=local-secret")
+	req.Header.Set("X-Api-Key", "someone-elses-key")
+	res := httptest.NewRecorder()
+	p.handler.ServeHTTP(res, req)
+	seen := p.anthropic()
+	if res.Code != http.StatusOK || len(seen) != 1 || seen[0].Method != http.MethodHead || seen[0].Path != "/api/hello" || seen[0].Query != "" {
+		t.Fatalf("HTTP %d, Anthropic got %+v", res.Code, seen)
+	}
+	// Nothing of the caller's travels with it but the name of the client.
+	for name := range seen[0].Header {
+		switch name {
+		case "User-Agent", "Accept-Encoding":
+		default:
+			t.Errorf("Anthropic was sent the header %s", name)
+		}
+	}
+	if seen[0].Header.Get("User-Agent") != "claude-cli/2.1.332" {
+		t.Errorf("User-Agent = %q", seen[0].Header.Get("User-Agent"))
+	}
+	// Only that one request. Everything else with the key and no login is what it was.
+	for _, tc := range []struct {
+		method, target string
+		want           int
+	}{
+		{http.MethodGet, "/k/" + testKey + "/api/hello", http.StatusNotFound},
+		{http.MethodHead, "/k/" + testKey + "/api/other", http.StatusNotFound},
+		{http.MethodPost, "/k/" + testKey + "/v1/files", http.StatusNotFound},
+		{http.MethodGet, "/k/" + testKey + "/v1/messages", http.StatusMethodNotAllowed},
+		{http.MethodGet, "/k/" + testKey + "/v1/models", http.StatusOK},
+	} {
+		res := httptest.NewRecorder()
+		p.handler.ServeHTTP(res, httptest.NewRequest(tc.method, tc.target, strings.NewReader("{}")))
+		if got := p.anthropic(); len(got) != 1 || res.Code != tc.want {
+			t.Errorf("%s %s: HTTP %d (want %d), Anthropic has had %d requests (want 1)", tc.method, strings.ReplaceAll(tc.target, testKey, "<key>"), res.Code, tc.want, len(got))
+		}
+	}
+	// The key in a header, as before this stage: the hello is not found, and not sent on.
+	req = httptest.NewRequest(http.MethodHead, "/api/hello", nil)
+	req.Header.Set("x-api-key", testKey)
+	res = httptest.NewRecorder()
+	p.handler.ServeHTTP(res, req)
+	if res.Code != http.StatusNotFound || len(p.anthropic()) != 1 {
+		t.Errorf("header key: HTTP %d, Anthropic has had %d", res.Code, len(p.anthropic()))
+	}
+	if lines := p.lines(t); len(lines) != 0 {
+		t.Errorf("a hello wrote ledger lines: %+v", lines)
+	}
+}
+
+func TestHandler_AHelloDoesNotWaitOnAStalledUpstream(t *testing.T) {
+	old := helloTimeout
+	helloTimeout = 150 * time.Millisecond
+	t.Cleanup(func() { helloTimeout = old })
+	release := make(chan struct{})
+	upstream, _ := anthropicStandIn(t, func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	})
+	t.Cleanup(func() { close(release) })
+	engine, err := WithAnthropic(upstream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend, _ := newFakeBackend(t)
+	handler := NewHandler(backend, testKey, engine)
+	started := time.Now()
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, httptest.NewRequest(http.MethodHead, "/k/"+testKey+"/api/hello", nil))
+	if took := time.Since(started); took > 3*time.Second || res.Code != http.StatusNotFound {
+		t.Fatalf("HTTP %d after %v; a stalled upstream gets the answer the proxy gave before, soon", res.Code, took)
+	}
+}
+
+func TestHandler_AHelloNeverPassesARedirectBack(t *testing.T) {
+	upstream, _ := anthropicStandIn(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://elsewhere.invalid/api/hello", http.StatusFound)
+	})
+	engine, err := WithAnthropic(upstream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend, _ := newFakeBackend(t)
+	res := httptest.NewRecorder()
+	NewHandler(backend, testKey, engine).ServeHTTP(res, httptest.NewRequest(http.MethodHead, "/k/"+testKey+"/api/hello", nil))
+	if res.Code != http.StatusNotFound || res.Header().Get("Location") != "" {
+		t.Fatalf("HTTP %d, Location %q", res.Code, res.Header().Get("Location"))
 	}
 }
