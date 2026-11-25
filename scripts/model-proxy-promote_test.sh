@@ -11,7 +11,7 @@ printf candidate > "$HOME/go/bin/aimux-dev"
 chmod +x "$HOME/go/bin/aimux" "$HOME/go/bin/aimux-dev"
 
 if [[ $# == 0 ]]; then
-  for scenario in guard install hud inference interrupt; do bash "./$(basename "$0")" "$scenario"; done
+  for scenario in guard install hud inference retry interrupt; do bash "./$(basename "$0")" "$scenario"; done
   exit
 fi
 case $1 in
@@ -83,6 +83,46 @@ s = http.server.HTTPServer(("127.0.0.1", 0), H); open(sys.argv[1], "w").write(st
     serve '{"type":"error","error":{"type":"api_error","message":"codex app-server exited"}}'
     if inference_ok "$(< "$port_file")"; then kill "$server"; printf 'FAIL: a failed inference passed\n' >&2; exit 1; fi
     kill "$server"
+    ;;
+  retry)
+    # The first answer after a restart can be slow enough to fail. One retry, and only one, decides the promote.
+    port_file=$scratch/port
+    count_file=$scratch/requests
+    serve() {
+      : > "$count_file"; rm -f "$port_file"
+      python3 -I -c '
+import http.server, sys
+replies = [r.encode() for r in sys.argv[3:]]
+class H(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get("content-length", 0)))
+        open(sys.argv[2], "a").write("x")
+        reply = replies.pop(0) if len(replies) > 1 else replies[0]
+        self.send_response(200); self.end_headers(); self.wfile.write(reply)
+    def log_message(self, *a): pass
+s = http.server.HTTPServer(("127.0.0.1", 0), H); open(sys.argv[1], "w").write(str(s.server_port)); s.serve_forever()
+' "$port_file" "$count_file" "$@" &
+      server=$!
+      for _ in $(seq 50); do [[ -s "$port_file" ]] && break; sleep 0.1; done
+    }
+    requests() { wc -c < "$count_file" | tr -d ' '; }
+    source "$script"
+    key=test-key
+    good='{"content":[{"type":"text","text":"AIMUX_PROXY_OK"}]}'
+    bad='{"type":"error","error":{"type":"api_error","message":"timeout"}}'
+    serve "$bad" "$good"
+    stable_inference_ok "$(< "$port_file")" 2>"$scratch/retry.err" || { kill "$server"; printf 'FAIL: a slow first answer rejected the build\n' >&2; exit 1; }
+    kill "$server"
+    [[ $(requests) == 2 ]] || { printf 'FAIL: expected 2 requests, saw %s\n' "$(requests)" >&2; exit 1; }
+    grep -q 'trying once more' "$scratch/retry.err" || { printf 'FAIL: the retry was not announced\n' >&2; exit 1; }
+    serve "$good"
+    stable_inference_ok "$(< "$port_file")" || { kill "$server"; printf 'FAIL: a correct answer was rejected\n' >&2; exit 1; }
+    kill "$server"
+    [[ $(requests) == 1 ]] || { printf 'FAIL: a passing check was repeated (%s requests)\n' "$(requests)" >&2; exit 1; }
+    serve "$bad"
+    if stable_inference_ok "$(< "$port_file")" 2>/dev/null; then kill "$server"; printf 'FAIL: two failed answers passed\n' >&2; exit 1; fi
+    kill "$server"
+    [[ $(requests) == 2 ]] || { printf 'FAIL: expected exactly one retry, saw %s requests\n' "$(requests)" >&2; exit 1; }
     ;;
   interrupt)
     # An interrupt between the swap and the stable check must restore the previous binary and restart stable.

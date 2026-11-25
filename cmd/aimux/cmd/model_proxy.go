@@ -113,6 +113,9 @@ func newModelProxyServeCmd() *cobra.Command {
 				Command: command, ServiceTier: serviceTier, Stderr: cmd.ErrOrStderr(), Version: rootCmd.Version,
 			})
 			defer backend.Close()
+			// Codex starts beside the listener, not before it: a slow or failed start must not keep the proxy
+			// from answering, and Start reports either outcome itself.
+			go func() { _ = backend.Start(ctx) }()
 			var handlerOptions []modelproxy.HandlerOption
 			if home, err := os.UserHomeDir(); err == nil {
 				// The bound port, not the flag: --port 0 asks the OS for one, and two such listeners must not

@@ -27,8 +27,8 @@ type Health struct {
 // CodexHealth describes the Codex side of the proxy.
 type CodexHealth struct {
 	Command string `json:"command"`
-	// AppServerRunning is false before the first turn and after a crash, which is normal: the proxy starts
-	// app-server again on the next turn.
+	// AppServerRunning is false while Codex is starting, after a failed start and after a crash, which is normal:
+	// the proxy starts app-server again on the next turn.
 	AppServerRunning bool `json:"app_server_running"`
 }
 

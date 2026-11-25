@@ -70,7 +70,8 @@ type CodexOptions struct {
 	Version     string
 }
 
-// NewCodexBackend starts app-server on the first turn.
+// NewCodexBackend does not start app-server: Start does, and so does the first turn when Start was not called or
+// failed.
 func NewCodexBackend(opts CodexOptions) *CodexBackend {
 	command := opts.Command
 	if command == "" {
@@ -152,6 +153,24 @@ func (b *CodexBackend) process(ctx context.Context) (*appServer, error) {
 	b.server = p
 	b.current.Store(p)
 	return p, nil
+}
+
+// Start brings app-server up ahead of the first request and says on stderr how long that took, or why it failed.
+// A failure is not fatal to the proxy: the next request starts Codex again.
+func (b *CodexBackend) Start(ctx context.Context) error {
+	before := b.current.Load()
+	began := time.Now()
+	p, err := b.process(ctx)
+	if b.stderr == nil {
+		return err
+	}
+	switch {
+	case err == nil && p != before:
+		_, _ = fmt.Fprintf(b.stderr, "model proxy: Codex started in %dms\n", time.Since(began).Milliseconds())
+	case err != nil && ctx.Err() == nil:
+		_, _ = fmt.Fprintf(b.stderr, "model proxy: Codex did not start, the first request will try again: %v\n", err)
+	}
+	return err
 }
 
 func (b *CodexBackend) Close() {
