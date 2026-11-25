@@ -507,11 +507,11 @@ func TestUpgradeServices_InterruptedUpgradeRollsBack(t *testing.T) {
 	current := program(t, "196")
 	seedOwnCopy(t, l, dir, current, "196")
 
+	// The interrupt arrives once the new build has been started, however slow the machine is.
 	ctx, cancel := context.WithCancel(context.Background())
-	time.AfterFunc(300*time.Millisecond, cancel)
 	started := time.Now()
 	results := UpgradeServices(ctx, []UpgradeService{{
-		ID: "model-proxy", Name: "model proxy", Dir: dir, Job: l, Probe: l.probe("model proxy"),
+		ID: "model-proxy", Name: "model proxy", Dir: dir, Job: interruptAfterPoint{l, cancel}, Probe: l.probe("model proxy"),
 	}}, UpgradeOptions{Source: program(t, ""), Build: "197", Wait: 30 * time.Second})
 
 	if took := time.Since(started); took > 15*time.Second {
@@ -750,5 +750,46 @@ func TestUpgradeServices_RetriedFirstMoveKeepsTheOriginalProgram(t *testing.T) {
 	}
 	if leftovers, _ := filepath.Glob(filepath.Join(dir, ".aimux-*")); len(leftovers) != 0 {
 		t.Fatalf("files left behind: %v", leftovers)
+	}
+}
+
+// interruptAfterPoint is a job whose first restart is followed by an interrupt, as Ctrl-C during the wait.
+type interruptAfterPoint struct {
+	*testLaunchd
+	cancel context.CancelFunc
+}
+
+func (j interruptAfterPoint) Point(program string) error {
+	err := j.testLaunchd.Point(program)
+	j.cancel()
+	return err
+}
+
+// The source is copied once for the whole run: upgrading from a kept previous build must not read that file again
+// after the first service's upgrade has replaced it.
+func TestUpgradeServices_SourceIsFixedForTheWholeRun(t *testing.T) {
+	first, second := newTestLaunchd(t), newTestLaunchd(t)
+	dirA, dirB := t.TempDir(), t.TempDir()
+	older, newer := program(t, "196"), program(t, "197")
+	for l, dir := range map[*testLaunchd]string{first: dirA, second: dirB} {
+		seedOwnCopy(t, l, dir, older, "196")
+		if got := upgradeOne(t, l, dir, newer, "197", settle); got.Outcome != UpgradeDone {
+			t.Fatalf("setup: %+v", got)
+		}
+	}
+
+	// The first service's kept build is the source; its own upgrade replaces that very file.
+	results := UpgradeServices(context.Background(), []UpgradeService{
+		{ID: "model-proxy", Name: "model proxy", Dir: dirA, Job: first, Probe: first.probe("model proxy")},
+		{ID: "collector", Name: "collector", Dir: dirB, Job: second, Probe: second.probe("collector")},
+	}, UpgradeOptions{Source: filepath.Join(dirA, ownName+".prev"), Build: "196", Wait: settle})
+
+	for _, r := range results {
+		if r.Outcome != UpgradeDone {
+			t.Fatalf("%s: %+v", r.Name, r)
+		}
+	}
+	if first.runningBuild() != "196" || second.runningBuild() != "196" {
+		t.Fatalf("running %q and %q, want both on 196", first.runningBuild(), second.runningBuild())
 	}
 }

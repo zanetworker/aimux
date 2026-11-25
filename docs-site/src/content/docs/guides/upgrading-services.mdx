@@ -40,6 +40,11 @@ aimux upgrade --dry-run
 
 To upgrade one service, name it: `aimux upgrade model-proxy` or `aimux upgrade collector`. `--json` prints the same facts for a script.
 
+Two limits to know before you run it:
+
+- **A port set on the job itself.** The upgrade checks a service on the port from your configuration. If its launchd job passes its own `--port`, the check looks at the wrong port and a healthy upgrade is rolled back. Set the port in `~/.aimux/config.yaml` instead.
+- **A lock left by a killed model proxy upgrade.** The model proxy's lock is a folder, `~/go/bin/.aimux-model-proxy-promotion`. If an upgrade or a promotion was killed, it stays, and the next one says another is in progress. Check that neither is running (`pgrep -fl 'aimux upgrade|model-proxy-promote'`), then remove the folder and run the upgrade again; it puts back any build the killed one left aside.
+
 Three things it guards against:
 
 - **Two changes at once.** Only one upgrade of a service runs at a time, and the model proxy is not upgraded while `scripts/model-proxy-promote` is promoting it. The service that is busy is skipped with a note and left as it was; the other service is still upgraded.

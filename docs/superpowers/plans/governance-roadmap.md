@@ -79,6 +79,7 @@ A stage is done when its "done when" line is true on the owner's machine, not wh
 | `aimux upgrade`: services run from their own copy | Three launchd jobs start `~/go/bin/aimux`, which any install overwrites | 0 | Done for the model proxy and the collector, in the same change as this line. The live jobs move when the owner runs `aimux upgrade` |
 | `aimux upgrade` probes the port its job passes | A job started with `--port` is probed on the configured port, so a healthy upgrade would be rolled back. Neither live job passes a port | 0 | Not started |
 | A stale promote lock after a killed model proxy upgrade | The lock is a folder and outlives a killed process; the error names it so it can be removed. A lock that releases on exit needs the promote script to share it | 0 | Not started |
+| A kill in the instant after `aimux upgrade` puts a leftover build back | The record of the interrupted swap is used up before the restart; a kill exactly there leaves the unchecked process running with nothing on disk to say so | Any | Not started |
 | `aimux upgrade` and a previous build without a health answer | A rollback to a build older than `/healthz` restarts it but cannot confirm it, and says the rollback failed | Any | Not started |
 | A request waiting for a slow Codex start cannot give up | The wait is on a mutex, so a caller's own deadline is not honoured while another caller starts Codex | Any | Not started |
 | The MCP proxy runs from its own copy | `aimux mcp proxy install` points its job at the binary that ran it and would move it back | 0 | Not started |

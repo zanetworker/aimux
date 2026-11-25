@@ -58,7 +58,7 @@ PLIST
     [[ $(< "$own/aimux") == service ]] || { printf 'FAIL: rollback did not restore the service copy\n' >&2; exit 1; }
     # A job with a Program key runs that file, whatever its first argument says.
     /usr/libexec/PlistBuddy -c "Add :Program string $HOME/elsewhere/aimux" "$HOME/Library/LaunchAgents/com.aimux.model-proxy.plist"
-    [[ $(bash -c "source '$script'; printf %s \"\$stable\"") == "$HOME/elsewhere/aimux" ]] || { printf 'FAIL: Program was not honoured\n' >&2; exit 1; }
+    [[ $(bash -c 'source "$1"; printf %s "$stable"' _ "$script") == "$HOME/elsewhere/aimux" ]] || { printf 'FAIL: Program was not honoured\n' >&2; exit 1; }
     # A job started through a wrapper names the wrapper: it is never replaced.
     /usr/libexec/PlistBuddy -c "Set :Program /bin/sh" "$HOME/Library/LaunchAgents/com.aimux.model-proxy.plist"
     if out=$(bash "$script" build-dev 2>&1); then printf 'FAIL: a wrapper was accepted as the promotion target\n' >&2; exit 1; fi

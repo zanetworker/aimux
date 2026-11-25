@@ -37,10 +37,10 @@ const ServiceProgram = "aimux"
 type ServiceJob interface {
 	// Program is the file the job runs, or "" when the job is not installed.
 	Program() (string, error)
-	// Point makes the job run program and starts it from there.
+	// Point makes the job run program and starts it afresh from there, also when the job already names that
+	// program: it is the only way the controller restarts a service, so what the supervisor has loaded and what
+	// its job file says cannot drift apart.
 	Point(program string) error
-	// Restart starts the job's process again from the file it already runs.
-	Restart() error
 }
 
 // UpgradeService is one background service that runs from its own copy of the program.
@@ -87,6 +87,20 @@ func UpgradeServices(ctx context.Context, services []UpgradeService, opts Upgrad
 		opts.Wait = 20 * time.Second
 	}
 	results := make([]UpgradeResult, len(services))
+	if !opts.DryRun && len(services) > 0 {
+		// One copy of the source for the whole run. The source can be a file an earlier service's upgrade
+		// replaces (a kept previous build), or the CLI itself while an install overwrites it.
+		snapshot, err := snapshotSource(opts.Source)
+		if err != nil {
+			for i, service := range services {
+				results[i] = UpgradeResult{ID: service.ID, Name: service.Name, To: opts.Build, Outcome: UpgradeFailed,
+					Problem: fmt.Sprintf("copy %s before starting: %v; nothing was changed", opts.Source, err)}
+			}
+			return results
+		}
+		defer func() { _ = os.RemoveAll(filepath.Dir(snapshot)) }() //nolint:gosec // G703: a temp folder this function made
+		opts.Source = snapshot
+	}
 	for i, service := range services {
 		// Once interrupted, no further service is touched.
 		if ctx.Err() != nil && !opts.DryRun {
@@ -213,16 +227,11 @@ func upgradeService(ctx context.Context, svc UpgradeService, opts UpgradeOptions
 		}
 	}
 	since := time.Now()
-	if needPoint {
-		err = svc.Job.Point(own)
-	} else {
-		err = svc.Job.Restart()
-	}
+	err = svc.Job.Point(own)
 	if err == nil {
 		err = waitUpgraded(ctx, svc, since, opts.Build, opts.Wait)
 	}
 	if err == nil {
-		_ = os.Remove(moved)
 		switch {
 		case needPoint && !noEarlier:
 			// The file the job ran before the move is the build to go back to. It wins over anything aside: after
@@ -233,6 +242,8 @@ func upgradeService(ctx context.Context, svc UpgradeService, opts UpgradeOptions
 		case aside != "":
 			err = os.Rename(aside, own+".prev")
 		}
+		// The note goes only now: a kill before the build was saved must leave the next run able to save it.
+		_ = os.Remove(moved)
 		if err != nil {
 			res.Problem = fmt.Sprintf("the build it replaced was not kept: %v", err)
 			// Nothing may stay aside after a success: the next run would take it for an interrupted swap and put
@@ -290,6 +301,20 @@ func lockService(dir string) (release func(), err error) {
 		return nil, err
 	}
 	return func() { _ = f.Close() }, nil
+}
+
+// snapshotSource copies the program to install into a temp file and returns its path.
+func snapshotSource(source string) (string, error) {
+	dir, err := os.MkdirTemp("", "aimux-upgrade-")
+	if err != nil {
+		return "", err
+	}
+	staged, err := stageCopy(source, dir)
+	if err != nil {
+		_ = os.RemoveAll(dir)
+		return "", err
+	}
+	return staged, nil
 }
 
 func fileExists(path string) bool {
@@ -383,7 +408,7 @@ func restoreService(ctx context.Context, svc UpgradeService, own, aside, was str
 	if pointed {
 		err = svc.Job.Point(was)
 	} else {
-		err = svc.Job.Restart()
+		err = svc.Job.Point(own)
 	}
 	if err != nil {
 		return err
@@ -405,7 +430,8 @@ func waitUpgraded(ctx context.Context, svc UpgradeService, since time.Time, buil
 	for {
 		row := runStatusProbe(ctx, svc.Probe, statusProbeLimit)
 		switch {
-		case row.State != ServiceOK:
+		// After a rollback (no build asked for) a degraded service is back: it was serving like that before.
+		case row.State != ServiceOK && (build != "" || row.State != ServiceDegraded):
 			last = string(row.State)
 			if row.Reason != "" {
 				last = row.Reason
