@@ -1,0 +1,27 @@
+{
+ "note": "A call the harness makes beside the conversation, under another model name: no session in the metadata, the session header only.",
+ "metadata_session": false,
+ "session_header": true,
+ "agent_header": false,
+ "outcome": "stateless",
+ "tools": 14,
+ "messages": [
+  {
+   "role": "user",
+   "kinds": [
+    "text",
+    "text",
+    "text"
+   ]
+  },
+  {
+   "role": "system",
+   "kinds": [
+    "text"
+   ]
+  }
+ ],
+ "prompts": 1,
+ "starts_turn": false,
+ "side": true
+}

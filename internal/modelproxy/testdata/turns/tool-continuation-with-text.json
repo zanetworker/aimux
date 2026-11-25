@@ -1,0 +1,40 @@
+{
+ "note": "A tool result with a text block beside it (a reminder the harness adds). Still not a new turn.",
+ "metadata_session": true,
+ "session_header": true,
+ "agent_header": false,
+ "outcome": "hit_continuation",
+ "tools": 12,
+ "messages": [
+  {
+   "role": "user",
+   "kinds": [
+    "text",
+    "text",
+    "text"
+   ]
+  },
+  {
+   "role": "system",
+   "kinds": [
+    "text"
+   ]
+  },
+  {
+   "role": "assistant",
+   "kinds": [
+    "tool_use"
+   ]
+  },
+  {
+   "role": "user",
+   "kinds": [
+    "tool_result",
+    "text"
+   ]
+  }
+ ],
+ "prompts": 1,
+ "starts_turn": false,
+ "side": false
+}

@@ -1,0 +1,42 @@
+{
+ "note": "The first prompt after /compact: the list starts again from a summary, so it holds fewer prompts than the session has had turns.",
+ "metadata_session": true,
+ "session_header": true,
+ "agent_header": false,
+ "outcome": "new_session",
+ "tools": 12,
+ "messages": [
+  {
+   "role": "user",
+   "kinds": [
+    "text"
+   ]
+  },
+  {
+   "role": "assistant",
+   "kinds": [
+    "text"
+   ]
+  },
+  {
+   "role": "user",
+   "kinds": [
+    "text",
+    "text",
+    "text",
+    "text",
+    "text",
+    "text"
+   ]
+  },
+  {
+   "role": "system",
+   "kinds": [
+    "text"
+   ]
+  }
+ ],
+ "prompts": 2,
+ "starts_turn": true,
+ "side": false
+}

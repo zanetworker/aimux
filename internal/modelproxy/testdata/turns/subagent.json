@@ -1,0 +1,27 @@
+{
+ "note": "A subagent's first request: same session id as its parent, the X-Claude-Code-Agent-Id header, its own short message list.",
+ "metadata_session": true,
+ "session_header": true,
+ "agent_header": true,
+ "outcome": "new_session",
+ "tools": 10,
+ "messages": [
+  {
+   "role": "user",
+   "kinds": [
+    "text",
+    "text",
+    "text"
+   ]
+  },
+  {
+   "role": "system",
+   "kinds": [
+    "text"
+   ]
+  }
+ ],
+ "prompts": 1,
+ "starts_turn": false,
+ "side": true
+}

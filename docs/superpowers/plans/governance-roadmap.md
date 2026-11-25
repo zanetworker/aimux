@@ -48,7 +48,7 @@ A stage is done when its "done when" line is true on the owner's machine, not wh
 | Stage | Delivers | Done when | Roadmap items | State |
 |---|---|---|---|---|
 | 0. Land what is waiting | Promote survives a cold start; `aimux upgrade`; the MCP proxy on its own copy; the two flaky tests | A promote has passed with the retry in place; `aimux upgrade` has moved the live model proxy, collector and MCP proxy, so `aimux status` shows no service running `~/go/bin/aimux` and a `go install` changes none; a broken build has been rolled back once on purpose; both flaky tests pass 20 runs in a row | Small work below | In progress: everything is built and the three services are moved. Two parts of its "done when" are not yet true: no promote has run since the retry was added, and a rollback has only been seen on a test job |
-| 1. One record | Ledger files written by the model proxy; a reader; a first meter | `aimux cost` shows requests and tokens per session and model for a day of real use, and its totals match `aimux model proxy stats` | Slice 1 | In progress. Plan: `2026-11-25-stage-1-ledger.md`. Task 2 is built: the line schema, the writer and the reader |
+| 1. One record | Ledger files written by the model proxy; a reader; a first meter | `aimux cost` shows requests and tokens per session and model for a day of real use, and its totals match `aimux model proxy stats` | Slice 1 | In progress. Plan: `2026-11-25-stage-1-ledger.md`. Built: the line schema, the writer and the reader ([#138](https://github.com/zanetworker/aimux/pull/138)); what identifies a turn, from real requests (task 1) |
 | 2. One way in, and identity | The entry wrapper behind `claude-codex`; the registry of parts; the parts menu in `aimux setup`; `enable`, `disable`; job files generated from the registry | A background call carries its session in the ledger; the model proxy's job file is one aimux wrote | Slice 2, base items B1 and B3 | Not started |
 | 3. A second engine, by choice | Anthropic passthrough and a sandbox entrance; switching model by hand in a session | A Claude session routed through the proxy runs a streamed tool call on Anthropic, then continues on Codex | Slice 8a | Not started. Waits on the sandbox half of 0a |
 | 4. The right model per task | Roles mapped to engines; fallback on a limit error | A helper runs on another engine than its main conversation without being told to, and the ledger shows both | Slices 8b, 8c | Not started |
@@ -148,7 +148,9 @@ Base items from the product-shape draft: B1 the registry of parts, B2 the servic
 ## Not yet verified, and where it gets tested
 
 1. The Claude login through a local address from inside a sandbox (0a, Wingman session).
-2. Whether an MCP request carries the harness's call id to the MCP proxy and the tool gateway (slice 1).
+2. Whether an MCP request carries the harness's call id to the MCP proxy and the tool gateway (slice 4; not looked at in stage 1).
+13. That a background model call's session header names the conversation it belongs to. The header is present on every one seen; its value was not compared (stage 1, task 3: the ledger lines will show it).
+14. That a hook counting prompts in the transcript reaches the model proxy's turn number (slice 3). The rule is in `../specs/2026-11-25-turn-identity.md`.
 3. That Codex hooks receive a call id the model proxy also sees (slice 3).
 4. The cost of the reporting hook per tool call (slice 3).
 5. A transcript written under Codex, continued on Anthropic (8a).
