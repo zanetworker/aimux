@@ -24,6 +24,10 @@ What the choice asks of the proxy (task 3):
 - Keep the query string. Every `POST /v1/messages` carried one.
 - Leave `Authorization` alone on its way to Anthropic, and never send it to Codex.
 
+And of the Anthropic engine (task 2): read usage from a gzip-compressed stream, and ask Anthropic for `gzip` only
+when the client offered it, so the answer is never in an encoding the reader cannot follow. The bytes of the
+answer still reach the client unchanged.
+
 ## What was done
 
 A throwaway forwarder listened on `127.0.0.1:7397` and passed every request to `https://api.anthropic.com`,
@@ -45,6 +49,7 @@ token or other provider setting in the environment.
 | Does a subagent's request carry the same login as the main one? | **Yes.** Same `Authorization` hash, same session id in the header and in the metadata, plus `X-Claude-Code-Agent-Id` |
 | Is the login the same across sessions? | Yes, one hash across all eleven `POST /v1/messages` requests of eight sessions |
 | Can a session name a `codex:` model with `--model`? | **Yes, the client sends it.** `--model codex:gpt-6.2-sol` produced two `POST /v1/messages` naming that model, carrying the subscription login and the path prefix, and no `X-Api-Key`. Anthropic answered 404 both times, as it should, and the client then reported a problem with the selected model. The client does not check the name before sending |
+| Is the answer compressed? | **Yes.** The client offers `gzip, deflate, br, zstd`, and the streamed answer to `POST /v1/messages` came back with `Content-Encoding: gzip` in both sessions checked. The plan's usage reader treated a compressed body as unreadable, which would leave every call without token figures |
 | Does the session id match between the header and the metadata? | Yes, on every `POST /v1/messages`, whatever model was named |
 
 The runs: a one-word reply with the path prefix; the same with the custom header and no prefix; a run with one
