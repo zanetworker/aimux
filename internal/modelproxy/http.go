@@ -26,6 +26,7 @@ type handlerConfig struct {
 	ledgerOff bool
 	turns     *turns
 	anthropic *anthropicEngine // nil: every request is answered by Codex, as before there was a second engine
+	upstreams map[string]*namedUpstream
 }
 
 // WithRequestLog records one line per answered request, for `aimux model proxy stats`.
@@ -40,6 +41,9 @@ func NewHandler(backend Backend, key string, options ...HandlerOption) http.Hand
 	}
 	if config.anthropic != nil {
 		config.anthropic.proxyKey = key
+	}
+	for _, upstream := range config.upstreams {
+		upstream.engine.proxyKey = key
 	}
 	mux := http.NewServeMux()
 	reporter, hasHealth := backend.(interface{ health() Health })
@@ -83,6 +87,7 @@ func NewHandler(backend Backend, key string, options ...HandlerOption) http.Hand
 			if config.anthropic != nil {
 				live.Engines = append(live.Engines, engineAnthropic)
 			}
+			live.Engines = append(live.Engines, config.upstreamNames()...)
 			_ = writeJSON(w, http.StatusOK, live)
 			return
 		}
@@ -90,6 +95,9 @@ func NewHandler(backend Backend, key string, options ...HandlerOption) http.Hand
 		if carried.viaPath {
 			// From here on nothing sees the key: not the routes, not a log line, not the other engine.
 			r = withoutKeyPrefix(r, path)
+		}
+		if serveNamedUpstream(w, r, carried, path, &config) {
+			return
 		}
 		if config.anthropic != nil {
 			serveEngines(w, r, carried, path, mux, &config)

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -87,6 +88,7 @@ func newModelProxyServeCmd() *cobra.Command {
 	var port int
 	var command, serviceTier string
 	var anthropic bool
+	var messagesUpstreams []string
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Serve the Codex model proxy on 127.0.0.1",
@@ -171,6 +173,24 @@ func newModelProxyServeCmd() *cobra.Command {
 				}
 				handlerOptions = append(handlerOptions, option)
 			}
+			namedUpstreams := map[string]bool{}
+			for _, pair := range messagesUpstreams {
+				name, address, ok := strings.Cut(pair, "=")
+				if !ok {
+					return fmt.Errorf("--messages-upstream %q: give it as name=address, for example enmaas=https://gateway.example", pair)
+				}
+				if namedUpstreams[name] {
+					// One name is one secret-store entry; two addresses under it would share a key.
+					return fmt.Errorf("--messages-upstream: the name %q is given twice", name)
+				}
+				namedUpstreams[name] = true
+				// Its key is read from the secret store when a request needs it, from the entry <name>-key.
+				option, err := modelproxy.WithMessagesUpstream(name, address, keyring.System(name+"-key").Lookup)
+				if err != nil {
+					return err
+				}
+				handlerOptions = append(handlerOptions, option)
+			}
 			if port == modelproxy.StablePort {
 				home, err := os.UserHomeDir()
 				if err != nil {
@@ -195,7 +215,9 @@ func newModelProxyServeCmd() *cobra.Command {
 	cmd.Flags().IntVar(&port, "port", modelproxy.StablePort, "Port on 127.0.0.1 (clients send the key stored in the "+modelproxy.KeyService+" Keychain entry)")
 	cmd.Flags().StringVar(&command, "codex-command", "", "Codex executable (default: codex-lean if available, otherwise codex)")
 	cmd.Flags().BoolVar(&anthropic, "anthropic", false,
-		"Also forward to Anthropic: a request that carries the caller's own Claude login and names a model other than codex:* goes to "+modelproxy.AnthropicUpstream+" unchanged. Requests with only the proxy key are answered by Codex as before")
+		"Also forward to Anthropic: a request that carries the caller's own Claude login and names a plain model (not codex:<model>, not <name>:<model> for a --messages-upstream) goes to "+modelproxy.AnthropicUpstream+" unchanged. Requests with only the proxy key are answered by Codex as before, or by a --messages-upstream when they name one")
+	cmd.Flags().StringArrayVar(&messagesUpstreams, "messages-upstream", nil,
+		"Another address that speaks the Messages API, as name=address (may be repeated). A request naming a model as <name>:<model> with the proxy key is sent there with the key from the secret-store entry <name>-key, and with none of the caller's credentials")
 	cmd.Flags().StringVar(&serviceTier, "service-tier", modelproxy.ServiceTierPriority,
 		"OpenAI service tier: priority is Codex's Fast tier (about twice the tokens a second, spending the plan's allowance faster); standard leaves Codex's own default")
 	return cmd
