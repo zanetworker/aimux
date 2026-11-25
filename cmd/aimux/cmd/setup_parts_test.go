@@ -196,4 +196,8 @@ func TestSetupParts_LeftAloneIsNotNothingToChange(t *testing.T) {
 	if strings.Contains(out.String(), "Nothing to change.") || !strings.Contains(out.String(), "left alone") {
 		t.Errorf("output:\n%s", out.String())
 	}
+	// Asked to apply, it does not report success: the proxy still does not match the settings.
+	if err := runSetupParts(context.Background(), path, services, setupPartsOpts{apply: true, yes: true}, &out); !errors.Is(err, errLeftAlone) || !strings.Contains(err.Error(), "model proxy") || job.reloads() != 0 {
+		t.Errorf("apply: %v", err)
+	}
 }
