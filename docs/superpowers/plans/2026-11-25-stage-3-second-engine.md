@@ -12,6 +12,23 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-23-aimux-governance-metering-and-evals-design.md` section 6 ("The second engine comes before the router", "When the choice is made"); `docs/superpowers/specs/2026-11-24-passthrough-spike-results.md`; `docs/superpowers/specs/2026-11-25-turn-identity.md`. Tracker: `docs/superpowers/plans/governance-roadmap.md`, stage 3.
 
+## Which engines, and when
+
+![Claude Code in front of the inference proxy; behind it, two engines that are forwarded to unchanged (Anthropic direct, and the internal gateway's Messages endpoint) and two that need translation (the Codex app-server, and OpenAI-style endpoints)](images/engines-map.png)
+
+Opus, Sonnet and Haiku are not engines: they are models on one engine, Anthropic, and the client picks among them by name. An engine is where a request is sent and whose credential pays for it.
+
+| Engine | Models | How the proxy talks to it | Whose credential | When |
+|---|---|---|---|---|
+| Codex app-server | `codex:gpt-6.2-sol`, `codex:gpt-6.2-astra` | Translated: a harness used as a backend | The owner's Codex login | Today |
+| Anthropic direct | `claude-opus-*`, `claude-sonnet-*`, `claude-haiku-*` | Forwarded unchanged | The caller's own subscription login | This stage |
+| The internal gateway's Messages endpoint | Its Claude models and the hosted open models, named with an `enmaas:` prefix | Forwarded unchanged: it speaks the same dialect at `/v1/messages`, with a key in `x-api-key` | The owner's gateway key, read from the Keychain by reference | Task 6, a small step once the forwarder exists |
+| OpenAI-style endpoints (a local model server, the gateway's GPT and Gemini models) | Named with their own prefix | Translated from Messages to chat completions or Responses | The owner's key for that endpoint | Later; a new translator, not a small step |
+
+Two consequences for this plan. The forwarder built in task 2 is written for any upstream that speaks the Messages dialect, with Anthropic as its first; task 6 adds a second without touching it. And a model name's prefix is what names the engine: none for Anthropic, `codex:` and `enmaas:` for the others.
+
+Codex appears twice in the picture. Behind the proxy it is an engine, which exists. In front of it, as a harness of its own, it speaks the Responses API, which the proxy does not; a native Codex session is covered by its own telemetry and, later, hooks, not by this door.
+
 ## Global Constraints
 
 - A session changes nothing unless the owner points it at the proxy. A request that carries the proxy key and no credential of its own is answered exactly as today, whatever model it names.
@@ -296,11 +313,45 @@ Expected: Claude Code reports a connection error. Write down exactly what the ow
 
 - [ ] **Step 4: The owner turns it on for the stable proxy** by adding `--anthropic` to its job and running `aimux upgrade model-proxy`. Mark stage 3 done in the tracker when step 2 has passed on the stable proxy.
 
+### Task 6: The internal gateway as a second upstream
+
+**Files:**
+- Modify: `internal/modelproxy/engines.go`, `internal/modelproxy/engines_test.go`, `internal/modelproxy/anthropic.go`, `cmd/aimux/cmd/model_proxy.go`
+- Modify: `docs-site/src/content/docs/advanced/model-proxy-channels.mdx`, the tracker
+
+**Interfaces:**
+- Consumes: `anthropicEngine.forward` (task 2), `chooseEngine` (task 3).
+- Produces: a second forwarder instance for an upstream given by `--messages-upstream name=url` on `aimux model proxy serve` (for example `enmaas=https://api.enmaas.devshift.net`), with its key read at each request from the Keychain entry `<name>-key`. A request naming `<name>:<model>` with the proxy key goes there: the prefix is removed from the model name in the forwarded body, the caller's `Authorization` is removed, and the upstream key is sent as `x-api-key`. Its ledger line has `Engine` `<name>`.
+
+- [ ] **Step 1: Write the failing tests** in `engines_test.go`:
+
+```go
+func TestChooseEngine_NamedUpstream(t *testing.T)
+// "enmaas:claude-opus-5-5" with the proxy key -> "enmaas"; without the proxy key -> errNeedsProxyKey (it spends
+// the owner's key); an unknown prefix "other:x" -> an error naming the configured prefixes.
+
+func TestHandler_NamedUpstreamGetsItsOwnKeyAndNotTheCallers(t *testing.T)
+// the fake upstream receives x-api-key with the configured key, no Authorization, and a body whose "model" is
+// "claude-opus-5-5"; every other byte of the body is unchanged.
+
+func TestHandler_NamedUpstreamKeyIsNeverLogged(t *testing.T)
+// the key appears in no response, no ledger line, no request-history line and nothing written to stderr.
+
+func TestHandler_MissingUpstreamKeyIsAClearError(t *testing.T)
+// no Keychain entry: 502 naming the entry to create, and no request reaches the upstream.
+```
+
+- [ ] **Step 2: Implement, run, then run it for real** against the gateway on the dev channel with one of its hosted open models, which cost nothing.
+Expected: an answer, and one ledger line with engine `enmaas`.
+
+- [ ] **Step 3: Full suite, docs, commit, pull request.**
+
 ## Not in this stage
 
 - The sandbox entrance, and Wingman's stages on a second engine. It waits on the sandbox half of the passthrough test.
 - Choosing an engine by role, by allowance or on a limit error (stage 4). Here the engine only follows the model the client names.
-- An OpenAI-compatible engine.
+- Engines that need a new translator: OpenAI-style endpoints such as a local model server, or the internal gateway's GPT and Gemini models.
+- Which data may go to which engine. Today the owner chooses the model, so he chooses where a conversation goes; a rule that a project's content may only reach engines approved for it comes with engine policies (stage 4).
 - The inference proxy in front of every session (stage 7). This stage is opt-in per shell.
 - Prices. An Anthropic call is recorded with measured tokens and still shows `unpriced`.
 - Keeping both engines warm, so that switching back costs only the missed turns.
