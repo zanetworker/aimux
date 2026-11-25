@@ -37,8 +37,9 @@ Three things hold on the way there:
 
 | | |
 |---|---|
-| In progress | Stage 1: the plan is written (`2026-11-25-stage-1-ledger.md`) and waits for the owner's review |
-| Next | Stage 3: a second engine, by choice (plan: `2026-11-25-stage-3-second-engine.md`). Stage 2 follows it |
+| In progress | Stage 3: a second engine, by choice (plan: `2026-11-25-stage-3-second-engine.md`). Task 1 of six is done: the proxy key travels as a path prefix in the base URL (`../specs/2026-11-25-second-engine-evidence.md`). Task 2, the Anthropic engine, is next |
+| Also open | Stage 1 is built and recording; it closes after a day of real use (task 5 of `2026-11-25-stage-1-ledger.md`) |
+| Next | Stage 2 follows stage 3 |
 | Waiting on the owner | Nothing that blocks; see "Waiting on the owner" |
 
 ## Stages
@@ -137,6 +138,7 @@ Base items from the product-shape draft: B1 the registry of parts, B2 the servic
 | 2026-11-25 | The inference proxy in front of every session is a separate, late stage with a checklist | It would make the proxy a dependency of every session |
 | 2026-11-25 | At most two pre-push review rounds per change, then it ships with the open findings listed, unless a P0 is open | `aimux upgrade` took six rounds; each found narrower cases and cost about eight minutes |
 | 2026-11-25 | Stage 3 (a second engine) is built before stage 2 (entry wrapper, parts menu) | The owner approved it: the two do not depend on each other, and the second engine changes what he can do each day |
+| 2026-11-25 | A session going to Anthropic presents the proxy key as a path prefix in its base URL, not as a custom header | The prefix arrived on every request of six real sessions; the header was missing from `HEAD /api/hello` |
 | 2026-11-25 | Pull requests stay small | The same change was 2,200 lines, which is what made each round slow |
 
 ## Paused or parked
@@ -153,7 +155,8 @@ Base items from the product-shape draft: B1 the registry of parts, B2 the servic
 
 1. The Claude login through a local address from inside a sandbox (0a, Wingman session).
 2. Whether an MCP request carries the harness's call id to the MCP proxy and the tool gateway (slice 4; not looked at in stage 1).
-13. What the requests under a Claude model name are that Claude Code sent in one captured run (16 of 27) and in none of three later ones, and whether their metadata names their session. The ledger records the model asked for and the session on every line, so a day of real use will show them (stage 1, task 5).
+13. What the requests under a Claude model name are that Claude Code sent in one captured run (16 of 27) and in none of three later ones, and whether their metadata names their session. The ledger records the model asked for and the session on every line, so a day of real use will show them (stage 1, task 5). A likely source, seen on 2026-11-25 and not confirmed as the cause: a child session started when a session ends inherits the proxy address and asks for its own default Claude model (`../specs/2026-11-25-second-engine-evidence.md`).
+15. What an interactive session does that a non-interactive one did not show: whether `/model codex:<name>` is accepted, whether a model change keeps the path prefix and the session id, and whether renewing the login or anything else calls a path besides `HEAD /api/hello` and `POST /v1/messages` (stage 3, task 5, the owner).
 14. That a hook counting prompts in the transcript reaches the model proxy's turn number (slice 3). The rule is in `../specs/2026-11-25-turn-identity.md`.
 3. That Codex hooks receive a call id the model proxy also sees (slice 3).
 4. The cost of the reporting hook per tool call (slice 3).
