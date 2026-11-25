@@ -20,6 +20,7 @@ import (
 	"github.com/zanetworker/aimux/internal/mcpproxy"
 	"github.com/zanetworker/aimux/internal/modelproxy"
 	"github.com/zanetworker/aimux/internal/otel"
+	"github.com/zanetworker/aimux/internal/parts"
 	"github.com/zanetworker/aimux/internal/toolgateway"
 )
 
@@ -31,12 +32,6 @@ type statusEnv struct {
 	gatewayStatus   func(context.Context) (toolgateway.ControlStatus, error)
 	collectorHealth func(context.Context, string) (otel.ReceiverHealth, error)
 }
-
-const (
-	modelStatusLabel     = "com.aimux.model-proxy"
-	collectorStatusLabel = "com.azaalouk.aimux-collect"
-	mcpStatusRestart     = "aimux upgrade mcp-proxy"
-)
 
 var (
 	errStatusKeyRejected  = errors.New("key rejected")
@@ -55,12 +50,16 @@ func defaultStatusProbes(env statusEnv) []controller.StatusProbe {
 	if env.collectorHealth == nil {
 		env.collectorHealth = readCollectorHealth
 	}
+	// Names, labels and update commands come from the registry (internal/parts), the one list of them. This is
+	// the order of the table. Where each is found and how it is asked stays its own: a service's address is not
+	// always the registry's default port.
+	model, mcp, gateway, collector := parts.MustService("model-proxy"), parts.MustService("mcp-proxy"), parts.MustService("tool-gateway"), parts.MustService("collector")
 	return []controller.StatusProbe{
-		env.probe("model proxy", env.modelAddr, modelStatusLabel, "aimux upgrade model-proxy", env.readModelStatus),
-		env.probe("mcp proxy", env.mcpAddr, proxyAgentLabel, mcpStatusRestart, env.readMCPStatus),
-		// Install rewrites the worker's launchd job and restarts it, waiting until it answers.
-		env.probe("tool gateway", env.gatewayAddr, gatewayAgentLabel, "aimux mcp proxy gateway install", env.readGatewayStatus),
-		env.probe("collector", env.collectorAddr, collectorStatusLabel, "aimux upgrade collector", env.readCollectorStatus),
+		env.probe(model.Name, env.modelAddr, model.Label, model.Update, env.readModelStatus),
+		env.probe(mcp.Name, env.mcpAddr, mcp.Label, mcp.Update, env.readMCPStatus),
+		// Its update command rewrites the worker's launchd job and restarts it, waiting until it answers.
+		env.probe(gateway.Name, env.gatewayAddr, gateway.Label, gateway.Update, env.readGatewayStatus),
+		env.probe(collector.Name, env.collectorAddr, collector.Label, collector.Update, env.readCollectorStatus),
 	}
 }
 

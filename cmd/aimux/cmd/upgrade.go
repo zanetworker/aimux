@@ -19,17 +19,22 @@ import (
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/controller"
 	"github.com/zanetworker/aimux/internal/mcpproxy"
+	"github.com/zanetworker/aimux/internal/parts"
 )
 
 // upgradeService is a background service upgrade moves to its own copy of the program. The order is the order
 // they are upgraded in.
 type upgradeService struct{ id, name, label string }
 
-var upgradeServices = []upgradeService{
-	{"model-proxy", "model proxy", modelStatusLabel},
-	{"mcp-proxy", "mcp proxy", proxyAgentLabel},
-	{"collector", "collector", collectorStatusLabel},
-}
+var upgradeServices = func() []upgradeService {
+	var managed []upgradeService
+	for _, s := range parts.Services() {
+		if s.Managed {
+			managed = append(managed, upgradeService{s.ID, s.Name, s.Label})
+		}
+	}
+	return managed
+}()
 
 // serviceProgram is a service's own copy of aimux, the file aimux upgrade maintains.
 func serviceProgram(home, id string) string {
@@ -45,14 +50,22 @@ func proxyAgentBinary(plistPath, own, cli string) string {
 	return cli
 }
 
-// notMoved are the services upgrade leaves alone for now, each with the command that updates it.
-var notMoved = []struct {
+// notMovedService is a service upgrade leaves alone for now, with the command that updates it.
+type notMovedService struct {
 	ID     string `json:"id"`
 	Name   string `json:"name"`
 	Update string `json:"update"`
-}{
-	{"tool-gateway", "tool gateway", "aimux mcp proxy gateway install"},
 }
+
+var notMoved = func() []notMovedService {
+	var left []notMovedService
+	for _, s := range parts.Services() {
+		if !s.Managed {
+			left = append(left, notMovedService{s.ID, s.Name, s.Update})
+		}
+	}
+	return left
+}()
 
 func newUpgradeCmd() *cobra.Command {
 	var dryRun bool

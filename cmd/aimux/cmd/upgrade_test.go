@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"github.com/zanetworker/aimux/internal/parts"
 	"os"
 	"path/filepath"
 	"strings"
@@ -339,4 +340,21 @@ func TestProxyAgentBinary(t *testing.T) {
 		t.Fatalf("no job yet: %q, want the CLI", got)
 	}
 	_ = job
+}
+
+// aimux upgrade waits on a service's status probe. A managed service the registry has and status does not probe
+// would be chosen for upgrade with nothing to wait on.
+func TestEveryManagedServiceHasAStatusProbe(t *testing.T) {
+	probes := map[string]bool{}
+	for _, probe := range defaultStatusProbes(statusEnv{}) {
+		probes[probe.Name] = true
+	}
+	for _, service := range parts.Services() {
+		if service.Managed && !probes[service.Name] {
+			t.Errorf("the registry's %s has no status probe named %q", service.ID, service.Name)
+		}
+	}
+	if len(upgradeServices) != 3 || len(notMoved) != 1 || notMoved[0].ID != "tool-gateway" {
+		t.Errorf("upgrade moves %d services and leaves %+v; want three moved and the tool gateway left", len(upgradeServices), notMoved)
+	}
 }
