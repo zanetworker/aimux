@@ -21,7 +21,7 @@ import (
 func newModelCmd() *cobra.Command {
 	model := &cobra.Command{Use: "model", Short: "Work with model APIs"}
 	proxy := &cobra.Command{Use: "proxy", Short: "Expose a local Anthropic Messages API"}
-	proxy.AddCommand(newModelProxyServeCmd(), newModelProxyStatusCmd(), newModelProxyStatsCmd())
+	proxy.AddCommand(newModelProxyServeCmd(), newModelProxyStatusCmd(), newModelProxyStatsCmd(), newModelProxyEnvCmd())
 	model.AddCommand(proxy)
 	return model
 }

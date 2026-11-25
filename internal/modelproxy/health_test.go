@@ -218,8 +218,9 @@ func TestLiveness_HidesTheErrorText(t *testing.T) {
 	if strings.Contains(body, marker) {
 		t.Fatalf("healthz leaks the error text: %s", body)
 	}
+	// As field names: "codex" is also the name of an engine, which the answer does list.
 	for _, field := range []string{"reason", "last_error", "command", "total", "failed", "codex"} {
-		if strings.Contains(body, `"`+field+`"`) {
+		if strings.Contains(body, `"`+field+`":`) {
 			t.Errorf("healthz carries %q: %s", field, body)
 		}
 	}

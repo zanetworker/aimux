@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -26,9 +27,24 @@ const (
 const keyPathPrefix = "/k/"
 
 var (
-	errNeedsProxyKey = errors.New("this model runs on the owner's Codex login and needs the proxy key; set the session's ANTHROPIC_BASE_URL to the proxy's address followed by /k/ and the proxy key")
+	errNeedsProxyKey = errors.New(`this model runs on the owner's Codex login and needs the proxy key; start the session from a shell where you ran: eval "$(aimux model proxy env)" (with --port for a proxy on another port than the stable one)`)
 	errNoCredential  = errors.New("invalid or missing proxy key")
 )
+
+// SessionEnv is the shell lines that point Claude Code sessions started from that shell at the proxy on port, for
+// both engines: the base URL carries the proxy key as its path prefix, and the two variables that would make
+// Claude Code use something other than the owner's Claude login are unset. Nothing is said about the model.
+// The first line holds the key: it is for eval, never for a screen or a log.
+func SessionEnv(port int, key string) []string {
+	return []string{
+		fmt.Sprintf("export ANTHROPIC_BASE_URL='http://127.0.0.1:%d%s%s'", port, keyPathPrefix, url.PathEscape(key)),
+		"unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN",
+	}
+}
+
+// SessionEnvOff undoes SessionEnv: the one variable that held the proxy key is unset, so a shell that goes back
+// to Anthropic directly cannot send the key there.
+func SessionEnvOff() []string { return []string{"unset ANTHROPIC_BASE_URL"} }
 
 // credentials is what a request carried, read once. It holds no credential, only which were present.
 type credentials struct {
