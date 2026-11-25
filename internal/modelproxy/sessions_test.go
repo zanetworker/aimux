@@ -359,8 +359,9 @@ func TestSessionLogsOnceWithoutPromptOrSessionID(t *testing.T) {
 	sessionPost(t, h, "claude-haiku", id, conversation("user", `"private background prompt"`))
 	lines := strings.Split(strings.TrimSpace(protocolLog(t, stderr.Name())), "\n")
 	want := regexp.MustCompile(`^model proxy: session=(new_session|stateless) input_tokens=17 cached_input_tokens=0 ttfb_ms=[0-9]+$`)
-	if len(lines) != 2 || !want.MatchString(lines[0]) || !want.MatchString(lines[1]) || lines[0] == lines[1] {
-		t.Fatalf("expected one content-free timing line for each request: %q", lines)
+	started := regexp.MustCompile(`^model proxy: Codex started in [0-9]+ms$`)
+	if len(lines) != 3 || !started.MatchString(lines[0]) || !want.MatchString(lines[1]) || !want.MatchString(lines[2]) || lines[1] == lines[2] {
+		t.Fatalf("expected the start line, then one content-free timing line for each request: %q", lines)
 	}
 }
 
@@ -388,6 +389,7 @@ func TestSessionLogsPausedUsageAsEstimated(t *testing.T) {
 	}
 	lines := strings.Split(strings.TrimSpace(protocolLog(t, stderr.Name())), "\n")
 	want := []string{
+		`^model proxy: Codex started in [0-9]+ms$`,
 		`^model proxy: session=new_session input_tokens=2 cached_input_tokens=21 ttfb_ms=[0-9]+$`,
 		`^model proxy: session=hit_idle usage=estimated estimated_input_tokens=2 estimated_cached_input_tokens=21 ttfb_ms=[0-9]+$`,
 		`^model proxy: session=new_session input_tokens=17 cached_input_tokens=0 ttfb_ms=[0-9]+$`,
