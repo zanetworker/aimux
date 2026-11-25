@@ -37,7 +37,7 @@ Three things hold on the way there:
 
 | | |
 |---|---|
-| In progress | Stage 3: a second engine, by choice (plan: `2026-11-25-stage-3-second-engine.md`). Task 1 of six is done: the proxy key travels as a path prefix in the base URL (`../specs/2026-11-25-second-engine-evidence.md`). Task 2, the Anthropic engine, is next |
+| In progress | Stage 3: a second engine, by choice (plan: `2026-11-25-stage-3-second-engine.md`). Tasks 1 and 2 of six are done: the proxy key travels as a path prefix in the base URL (`../specs/2026-11-25-second-engine-evidence.md`), and the Anthropic engine forwards a request unchanged and reads its token figures (`internal/modelproxy/anthropic.go`; nothing calls it yet). Task 3, choosing the engine per request, is next |
 | Also open | Stage 1 is built and recording; it closes after a day of real use (task 5 of `2026-11-25-stage-1-ledger.md`) |
 | Next | Stage 2 follows stage 3 |
 | Waiting on the owner | Nothing that blocks; see "Waiting on the owner" |
