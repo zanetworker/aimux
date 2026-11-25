@@ -37,9 +37,9 @@ Three things hold on the way there:
 
 | | |
 |---|---|
-| In progress | Stage 0 |
-| Next | Stage 1: the plan for the ledger, shown to the owner before building |
-| Waiting on the owner | To run `aimux upgrade mcp-proxy` once; see "Waiting on the owner" |
+| In progress | Stage 1: the plan is written (`2026-11-25-stage-1-ledger.md`) and waits for the owner's review |
+| Next | Stage 2: the entry wrapper, the parts menu, generated job files |
+| Waiting on the owner | His review of the stage 1 plan; see "Waiting on the owner" |
 
 ## Stages
 
@@ -47,8 +47,8 @@ A stage is done when its "done when" line is true on the owner's machine, not wh
 
 | Stage | Delivers | Done when | Roadmap items | State |
 |---|---|---|---|---|
-| 0. Land what is waiting | Promote survives a cold start; `aimux upgrade`; the MCP proxy on its own copy; the two flaky tests | A promote has passed with the retry in place; `aimux upgrade` has moved the live model proxy, collector and MCP proxy, so `aimux status` shows no service running `~/go/bin/aimux` and a `go install` changes none; a broken build has been rolled back once on purpose; both flaky tests pass 20 runs in a row | Small work below | In progress |
-| 1. One record | Ledger files written by the model proxy; a reader; a first meter | `aimux cost` shows requests and tokens per session and model for a day of real use, and its totals match `aimux model proxy stats` | Slice 1 | Next. No plan yet |
+| 0. Land what is waiting | Promote survives a cold start; `aimux upgrade`; the MCP proxy on its own copy; the two flaky tests | A promote has passed with the retry in place; `aimux upgrade` has moved the live model proxy, collector and MCP proxy, so `aimux status` shows no service running `~/go/bin/aimux` and a `go install` changes none; a broken build has been rolled back once on purpose; both flaky tests pass 20 runs in a row | Small work below | In progress: everything is built and the three services are moved. Two parts of its "done when" are not yet true: no promote has run since the retry was added, and a rollback has only been seen on a test job |
+| 1. One record | Ledger files written by the model proxy; a reader; a first meter | `aimux cost` shows requests and tokens per session and model for a day of real use, and its totals match `aimux model proxy stats` | Slice 1 | In progress. Plan: `2026-11-25-stage-1-ledger.md` |
 | 2. One way in, and identity | The entry wrapper behind `claude-codex`; the registry of parts; the parts menu in `aimux setup`; `enable`, `disable`; job files generated from the registry | A background call carries its session in the ledger; the model proxy's job file is one aimux wrote | Slice 2, base items B1 and B3 | Not started |
 | 3. A second engine, by choice | Anthropic passthrough and a sandbox entrance; switching model by hand in a session | A Claude session routed through the proxy runs a streamed tool call on Anthropic, then continues on Codex | Slice 8a | Not started. Waits on the sandbox half of 0a |
 | 4. The right model per task | Roles mapped to engines; fallback on a limit error | A helper runs on another engine than its main conversation without being told to, and the ledger shows both | Slices 8b, 8c | Not started |
@@ -82,11 +82,12 @@ A stage is done when its "done when" line is true on the owner's machine, not wh
 | A kill in the instant after `aimux upgrade` puts a leftover build back | The record of the interrupted swap is used up before the restart; a kill exactly there leaves the unchecked process running with nothing on disk to say so | Any | Not started |
 | `aimux upgrade` and a previous build without a health answer | A rollback to a build older than `/healthz` restarts it but cannot confirm it, and says the rollback failed | Any | Not started |
 | A request waiting for a slow Codex start cannot give up | The wait is on a mutex, so a caller's own deadline is not honoured while another caller starts Codex | Any | Not started |
-| The MCP proxy runs from its own copy | `aimux mcp proxy install` pointed its job at the binary that ran it and would have moved it back. `aimux upgrade` now handles it, and an install keeps a moved job where it is | 0 | Done, in the same change as this line. The live job moves when the owner runs `aimux upgrade mcp-proxy` |
+| The MCP proxy runs from its own copy | `aimux mcp proxy install` pointed its job at the binary that ran it and would have moved it back. `aimux upgrade` now handles it, and an install keeps a moved job where it is | 0 | Done ([#136](https://github.com/zanetworker/aimux/pull/136)). The live job was moved on 2026-11-25 and runs build 213 from its own copy. It has no previous build beside it: the CLI it ran had already been replaced by the same build |
 | Flaky test `TestProxyStatus_NeverPrintsEnvValues` | A real fault, not a test fault: an MCP server that exits so fast that the start itself fails lost its stderr, so its error did not say why. Reproduced under Linux (3 of 3 runs) and fixed in `internal/mcpproxy/stdio.go` | 0 | Done, in the same change as this line |
 | Flaky test `TestClaude_SharesOneLiveCache` | Failed once in the full suite; it depended on a one-second cache surviving a loaded machine. An attempt that outlasts the window is now repeated | 0 | Done, in the same change as this line |
 | Requested and served model in the request history | Only the first is recorded | 1 | Folded into slice 1 |
 | Hooks that run another aimux than the one upgraded | If Claude Code's MCP hooks run an older aimux from another path, its installer points the MCP proxy's job back at itself. On this machine the hooks run the CLI on the PATH, so it does not arise; the guide says so | Any | Not started |
+| Every merge makes every service look out of date | One version for the tool means `aimux status` flags a service after a merge that did not change it, and a plain `aimux upgrade` restarts it for nothing | 2 | Not started. Belongs with upgrading a service only when idle |
 | The tool gateway reports its build | Its build column in `aimux status` is empty | Any | Not started |
 | The tool gateway runs from its own copy | It runs a hand-kept copy under `~/.aimux/wingman/bin/` | 2 | With the Wingman session |
 | Services follow an installed release by themselves | After `brew upgrade` nothing moves the services | 2 | Not started. For release builds only; the owner's services move when he says so |
@@ -156,12 +157,12 @@ Base items from the product-shape draft: B1 the registry of parts, B2 the servic
 8. Quality of each model inside this harness, per role (stage 4 onward; eval cases are the source).
 9. That the fix in [#131](https://github.com/zanetworker/aimux/pull/131) removes the failures on new conversations: check `aimux model proxy stats` after a day of use.
 10. Why the first answer after a restart of the stable proxy took 28 to 50 seconds on 2026-11-24. Measured alone, Codex starts in 2 to 4 seconds and a first answer begins 3 seconds later. The step timings come with the ledger's model-call lines (stage 1).
-11. `aimux upgrade` on the live MCP proxy job. On the live model proxy and collector it worked on 2026-11-25 (194 to 211, both answering, build 194 kept as `aimux.prev`, nothing left aside). A rollback has only been seen on a job of the test's own (`TestUpgradeLive_AgainstLaunchd`, build tag `launchdlive`).
+11. A rollback by `aimux upgrade` on a live job. The upgrade itself worked on all three on 2026-11-25 (model proxy and collector 194 to 211 with build 194 kept as `aimux.prev`; MCP proxy 194 to 213), nothing left aside. A rollback has only been seen on a job of the test's own (`TestUpgradeLive_AgainstLaunchd`, build tag `launchdlive`).
 12. Whether the collector answers within 20 seconds of a restart under launchd.
 
 ## Waiting on the owner
 
-1. To run `aimux upgrade mcp-proxy` once, between tasks: it makes every open session reconnect its MCP servers. The model proxy and the collector were moved on 2026-11-25 and run build 211 from their own copies, with build 194 kept beside them.
+1. To review the stage 1 plan (`2026-11-25-stage-1-ledger.md`) and say how it should be built. Task 1 of it needs a few minutes of his Claude Code session on the dev proxy.
 2. Whether evals resume right after stage 1 for the parts that need only the turn id.
 3. Whether the hook may ever refuse a tool call. Slice 3 is report-only whatever the answer.
 4. Whether there is a source for Claude's remaining allowance. Without one the limit error is the only trigger.
@@ -194,3 +195,5 @@ Base items from the product-shape draft: B1 the registry of parts, B2 the servic
 | 2026-11-24 | Design, first-slice plan and passthrough results committed; promoted to build 194 |
 | 2026-11-25 | [#132](https://github.com/zanetworker/aimux/pull/132) this page as the programme's tracker, and the product-shape draft |
 | 2026-11-25 | [#133](https://github.com/zanetworker/aimux/pull/133) the proxy starts Codex when it starts; the promote's last check retries once |
+| 2026-11-25 | [#134](https://github.com/zanetworker/aimux/pull/134), [#136](https://github.com/zanetworker/aimux/pull/136) `aimux upgrade`; the model proxy, the MCP proxy and the collector run from their own copies on the owner's machine |
+| 2026-11-25 | [#135](https://github.com/zanetworker/aimux/pull/135) both flaky tests; one was a real fault in how a fast-exiting MCP server's stderr was read |
