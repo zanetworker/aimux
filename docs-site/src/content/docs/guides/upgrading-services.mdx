@@ -1,0 +1,91 @@
+---
+title: Upgrading the Background Services
+description: Bring the model proxy and the collector to the aimux build you just installed, with the previous build put back if the new one does not answer.
+---
+
+Installing a new `aimux` changes the command you type. The background services keep running the build they were started from until you run:
+
+```bash
+aimux upgrade
+```
+
+```text
+aimux upgrade to build 196
+
+SERVICE      RESULT           BUILD
+model proxy  upgraded         194 -> 196
+collector    already current  196
+
+NOTES
+mcp proxy: not moved by upgrade yet; update it with: aimux mcp proxy restart
+tool gateway: not moved by upgrade yet; update it with: aimux mcp proxy gateway install
+```
+
+## What it does
+
+For each service, one after the other:
+
+1. A service that already runs this build from its own copy is left running, also when it reports itself degraded.
+2. Otherwise the `aimux` you ran is copied into the service's own folder, `~/.aimux/services/<service>/aimux`.
+3. The service is restarted and has 20 seconds to answer on the new build.
+4. A service that does not answer gets its previous program back and is restarted on it. The next service is still tried.
+
+The exit code is 1 when a service was not upgraded, and its line under `NOTES` says why and whether the previous program runs again. A service you name that has no launchd job also counts as not upgraded.
+
+Restarting the model proxy ends the turns in flight on it, so run the upgrade between tasks. To see the plan without changing anything:
+
+```bash
+aimux upgrade --dry-run
+```
+
+To upgrade one service, name it: `aimux upgrade model-proxy` or `aimux upgrade collector`. `--json` prints the same facts for a script.
+
+Two limits to know before you run it:
+
+- **A port set on the job itself.** The upgrade checks a service on the port from your configuration. If its launchd job passes its own `--port`, the check looks at the wrong port and a healthy upgrade is rolled back. Set the port in `~/.aimux/config.yaml` instead.
+- **A lock left by a killed model proxy upgrade.** The model proxy's lock is a folder, `~/go/bin/.aimux-model-proxy-promotion`. If an upgrade or a promotion was killed, it stays, and the next one says another is in progress. Check that neither is running (`pgrep -fl 'aimux upgrade|model-proxy-promote'`), then remove the folder and run the upgrade again; it puts back any build the killed one left aside.
+
+Three things it guards against:
+
+- **Two changes at once.** Only one upgrade of a service runs at a time, and the model proxy is not upgraded while `scripts/model-proxy-promote` is promoting it. The service that is busy is skipped with a note and left as it was; the other service is still upgraded.
+- **An interrupt.** Ctrl-C during the wait puts the previous program back before the command exits.
+- **Being killed.** The program's path never stops existing during the swap, and a build left aside by a killed upgrade is kept as the previous build by the next one.
+
+## Each service has its own copy
+
+A service runs from its own copy of the program, not from the `aimux` on your `PATH`. Installing a new build therefore never changes what a running service would start after a crash: it restarts on the build it was already running.
+
+The first upgrade moves a service there. Its launchd job is rewritten to run the copy and the service is restarted, even when it already reports this build, because it has to start from the new file. A line under `NOTES` names the file it ran before:
+
+```text
+model proxy: its launchd job ran /Users/you/go/bin/aimux; it now runs /Users/you/.aimux/services/model-proxy/aimux
+```
+
+That first move has one limit. The only earlier build is the file the job ran before. If you had already installed this same build over it, a failed move has no earlier build to return to, and the note says so instead of claiming a rollback. Run the first upgrade from a build you trust.
+
+After that, `aimux status` showing the model proxy or the collector on an older build than the CLI means you installed a build and have not upgraded the services yet. Its fix column says `aimux upgrade <service>`.
+
+## Going back
+
+Each upgrade keeps the build it replaced as `aimux.prev` beside the service's copy. On the first move that is the file the job ran before, unless it was already this same build. To return a service to it, run that build's own upgrade:
+
+```bash
+~/.aimux/services/model-proxy/aimux.prev upgrade model-proxy
+```
+
+The two builds change places, so the same command undoes it.
+
+If the kept build is older than `aimux upgrade` itself, it has no such command. That can only be the build from before a service's first move. Put it back by hand:
+
+```bash
+cd ~/.aimux/services/model-proxy
+cp aimux.prev aimux.back && mv aimux.back aimux
+launchctl kickstart -k gui/$(id -u)/com.aimux.model-proxy
+```
+
+## The services upgrade does not move yet
+
+| Service | Update it with | Why it is not moved |
+|---|---|---|
+| MCP proxy | `aimux mcp proxy restart` restarts it from the program its job already names, normally the `aimux` on your `PATH`. To make its job name another program, run `aimux mcp proxy install` from that program | `aimux mcp proxy install` points its job at the `aimux` that ran it, and would move it back |
+| Tool gateway | `aimux mcp proxy gateway install` | It runs a separate copy kept for Wingman |

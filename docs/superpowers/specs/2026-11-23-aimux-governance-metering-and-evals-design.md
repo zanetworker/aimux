@@ -352,13 +352,13 @@ system.
    last activity, problems each with one fix. It carries state and counts only. The collector's `/debug`
    endpoint can return prompt excerpts, so diagnostics stay separate and anything a sandbox can reach asks
    for the key first.
-3. **One upgrade, in two stages.** First, the existing promote script is extended: it shows which build
-   each service runs and restarts the ones the owner names. That is enough to end mixed builds. Later, and
-   only if that proves clumsy, `aimux upgrade` does the whole thing: test each service's candidate on a
-   spare port with scratch state (the collector derives its data folder from the home directory whatever its
-   port), swap the binary once, restart the services one at a time with a health check after each, and on a
-   failed check restart exactly the ones already switched on the previous build. A service with live
-   connections restarts when idle or on the owner's confirmation.
+3. **One upgrade.** `aimux upgrade` brings the services to the build the owner runs. Extending the promote
+   script to every service was the first plan and was dropped before it was built: promoting each piece by
+   hand is a release gate, not how a tool is used. The promote stays as the careful path for the model
+   proxy. The command copies the build into each service's folder, restarts the services one at a time with
+   a health check after each, and gives a service that fails its check its previous build back. It does not
+   test a candidate on a spare port first, and it restarts a service with live connections without asking;
+   either is added when it is missed.
 4. **Services run from their own copy of the program, not from the one the owner types.** Today three of
    the four launchd jobs start `~/go/bin/aimux`, which is also where `go install` puts a fresh build, so any
    install silently changes what a service will run the next time it restarts or crashes, tested or not. On
@@ -366,8 +366,10 @@ system.
    have brought up a build no promote had tested. The fourth job runs a second copy under
    `~/.aimux/wingman/bin/`, updated by hand. Instead:
    - the CLI stays where it is and changes freely;
-   - services run from one location only the upgrade step writes, `~/.aimux/services/`, holding the current
-     build and the previous one for rollback, with every launchd job pointing there;
+   - services run from one location only the upgrade step writes, `~/.aimux/services/`, with a folder per
+     service holding its current build and the previous one for rollback, and every launchd job pointing at
+     its own folder. A folder per service, not one shared file: a service that fails its check gets its own
+     previous build back while the others keep the new one;
    - so the file a service was started from is the file it would restart from, and the only time a running
      service differs from it is during an upgrade, labelled `restart pending`;
    - a service kept on another build on purpose is an explicit pin recorded there and shown as `pinned`,

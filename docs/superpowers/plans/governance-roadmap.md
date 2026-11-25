@@ -39,7 +39,7 @@ Three things hold on the way there:
 |---|---|
 | In progress | Stage 0 |
 | Next | Stage 1: the plan for the ledger, shown to the owner before building |
-| Waiting on the owner | His word to commit the two built changes; see "Waiting on the owner" |
+| Waiting on the owner | To run `aimux upgrade` once on the live model proxy and collector; see "Waiting on the owner" |
 
 ## Stages
 
@@ -75,8 +75,13 @@ A stage is done when its "done when" line is true on the owner's machine, not wh
 
 | Item | Why | Stage | State |
 |---|---|---|---|
-| Promote survives a cold start | The first request after a restart can time out, and a good build is then rejected | 0 | Built and tested in `aimux-worktrees/promote-cold-start`; waits for the owner's word to commit |
-| `aimux upgrade`: services run from their own copy | Three launchd jobs start `~/go/bin/aimux`, which any install overwrites | 0 | Built and tested in `aimux-worktrees/aimux-upgrade` for the model proxy and the collector; waits for the owner's word to commit |
+| Promote survives a cold start | The first request after a restart can time out, and a good build is then rejected | 0 | Done ([#133](https://github.com/zanetworker/aimux/pull/133)). Not yet seen in a real promote |
+| `aimux upgrade`: services run from their own copy | Three launchd jobs start `~/go/bin/aimux`, which any install overwrites | 0 | Done for the model proxy and the collector, in the same change as this line. The live jobs move when the owner runs `aimux upgrade` |
+| `aimux upgrade` probes the port its job passes | A job started with `--port` is probed on the configured port, so a healthy upgrade would be rolled back. Neither live job passes a port | 0 | Not started |
+| A stale promote lock after a killed model proxy upgrade | The lock is a folder and outlives a killed process; the error names it so it can be removed. A lock that releases on exit needs the promote script to share it | 0 | Not started |
+| A kill in the instant after `aimux upgrade` puts a leftover build back | The record of the interrupted swap is used up before the restart; a kill exactly there leaves the unchecked process running with nothing on disk to say so | Any | Not started |
+| `aimux upgrade` and a previous build without a health answer | A rollback to a build older than `/healthz` restarts it but cannot confirm it, and says the rollback failed | Any | Not started |
+| A request waiting for a slow Codex start cannot give up | The wait is on a mutex, so a caller's own deadline is not honoured while another caller starts Codex | Any | Not started |
 | The MCP proxy runs from its own copy | `aimux mcp proxy install` points its job at the binary that ran it and would move it back | 0 | Not started |
 | Flaky test `TestProxyStatus_NeverPrintsEnvValues` | A real fault, not a test fault: an MCP server that exits so fast that the start itself fails lost its stderr, so its error did not say why. Reproduced under Linux (3 of 3 runs) and fixed in `internal/mcpproxy/stdio.go` | 0 | Done, in the same change as this line |
 | Flaky test `TestClaude_SharesOneLiveCache` | Failed once in the full suite; it depended on a one-second cache surviving a loaded machine. An attempt that outlasts the window is now repeated | 0 | Done, in the same change as this line |
@@ -125,6 +130,8 @@ Base items from the product-shape draft: B1 the registry of parts, B2 the servic
 | 2026-11-25 | Generated job files first; a daemon only when schedules or a second platform need one | No new code between the owner and his two daily proxies |
 | 2026-11-25 | Routing per task and evals move ahead of the reporting hook; schedules and `aimux run` go last | The owner ranks them higher, and neither needs the hook |
 | 2026-11-25 | The inference proxy in front of every session is a separate, late stage with a checklist | It would make the proxy a dependency of every session |
+| 2026-11-25 | At most two pre-push review rounds per change, then it ships with the open findings listed, unless a P0 is open | `aimux upgrade` took six rounds; each found narrower cases and cost about eight minutes |
+| 2026-11-25 | Pull requests stay small | The same change was 2,200 lines, which is what made each round slow |
 
 ## Paused or parked
 
@@ -148,12 +155,12 @@ Base items from the product-shape draft: B1 the registry of parts, B2 the servic
 8. Quality of each model inside this harness, per role (stage 4 onward; eval cases are the source).
 9. That the fix in [#131](https://github.com/zanetworker/aimux/pull/131) removes the failures on new conversations: check `aimux model proxy stats` after a day of use.
 10. Why the first answer after a restart of the stable proxy took 28 to 50 seconds on 2026-11-24. Measured alone, Codex starts in 2 to 4 seconds and a first answer begins 3 seconds later. The step timings come with the ledger's model-call lines (stage 1).
-11. `aimux upgrade` on the live model proxy and collector jobs. It passed against the real launchd on a job of its own.
+11. `aimux upgrade` on the live model proxy and collector jobs. It passes against the real launchd on a job of its own (`TestUpgradeLive_AgainstLaunchd`, build tag `launchdlive`): moved, found current, a broken build rolled back, upgraded in place.
 12. Whether the collector answers within 20 seconds of a restart under launchd.
 
 ## Waiting on the owner
 
-1. His word to commit and open the two built changes (promote survives a cold start; `aimux upgrade`), then to run `aimux upgrade` once on the live jobs.
+1. To run `aimux upgrade --dry-run`, then `aimux upgrade`, once on the live model proxy and collector, from a build he trusts. Until then both still run `~/go/bin/aimux`.
 2. Whether evals resume right after stage 1 for the parts that need only the turn id.
 3. Whether the hook may ever refuse a tool call. Slice 3 is report-only whatever the answer.
 4. Whether there is a source for Claude's remaining allowance. Without one the limit error is the only trigger.
@@ -184,3 +191,5 @@ Base items from the product-shape draft: B1 the registry of parts, B2 the servic
 | 2026-11-24 | [#130](https://github.com/zanetworker/aimux/pull/130) `aimux status`, keyless `/healthz` on the model proxy, `/health` on the collector |
 | 2026-11-24 | [#131](https://github.com/zanetworker/aimux/pull/131) each lifecycle step gets its own clock; a timeout is recorded as `timeout` |
 | 2026-11-24 | Design, first-slice plan and passthrough results committed; promoted to build 194 |
+| 2026-11-25 | [#132](https://github.com/zanetworker/aimux/pull/132) this page as the programme's tracker, and the product-shape draft |
+| 2026-11-25 | [#133](https://github.com/zanetworker/aimux/pull/133) the proxy starts Codex when it starts; the promote's last check retries once |
