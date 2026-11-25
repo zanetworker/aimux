@@ -37,10 +37,10 @@ Three things hold on the way there:
 
 | | |
 |---|---|
-| In progress | Stage 3: a second engine, by choice (plan: `2026-11-25-stage-3-second-engine.md`). Done: the key travels as a path prefix (task 1, `../specs/2026-11-25-second-engine-evidence.md`); the Anthropic engine (task 2); the proxy chooses the engine per request and writes `switch` lines, behind `aimux model proxy serve --anthropic`, off by default (task 3). On a spare port one real session ran a tool call on Anthropic, continued on Codex and went back, remembering across both. Task 3 is finished: `aimux cost --by model` names the engine, and a conversation holding blocks only Anthropic makes continues on Codex with a note in their place. Task 4 is done: `eval "$(aimux model proxy env)"` points a shell's sessions at the proxy, and `--off` undoes it; run for real on a spare port, one session on each engine. Task 5, step 1 (what the proxy costs): its own added time is 0.09 ms per request; real turns are dominated by Anthropic's one to two seconds to first byte and showed no gap on cached prompts and an unexplained 0.3 s on prompts that write to the cache, in samples of six (`../specs/2026-11-25-second-engine-evidence.md`). The plan's own measure, twenty real turns each way by time to first byte, is still open: either it is run, or the owner accepts these figures. Also left of task 5, and the owner's: an interactive session with `/model` both ways, a dead proxy, then `--anthropic` on the stable proxy. Task 6 is done: `--messages-upstream name=address` adds an engine paid for with a key from the secret store; run for real, a session with a tool call answered by a hosted model on the internal gateway |
+| In progress | Stage 3: a second engine, by choice (plan: `2026-11-25-stage-3-second-engine.md`). All six tasks are built and merged; everything is off until the proxy is started with `--anthropic` or `--messages-upstream`, and the stable proxy has neither. On spare ports, with real sessions: a tool call on Anthropic continued on Codex and back; a session on each engine from a shell set by `aimux model proxy env`; a tool call answered by a hosted model on the internal gateway. The proxy's own added time is 0.09 ms a request (`../specs/2026-11-25-second-engine-evidence.md`). The stage closes with the owner's checks below |
 | Also open | Stage 1 is built and recording; it closes after a day of real use (task 5 of `2026-11-25-stage-1-ledger.md`) |
 | Next | Stage 2 follows stage 3 |
-| Waiting on the owner | Nothing that blocks; see "Waiting on the owner" |
+| Waiting on the owner | Stage 3's close: item 1 under "Waiting on the owner" |
 
 ## Stages
 
@@ -174,7 +174,12 @@ Base items from the product-shape draft: B1 the registry of parts, B2 the servic
 
 ## Waiting on the owner
 
-1. In stage 3's last task: an interactive `/model` round trip between Anthropic and Codex, which only he can drive, and turning the Anthropic engine on for the stable proxy.
+1. Stage 3's close (task 5 of its plan), in this order:
+   - Start a dev proxy with both engines (`aimux model proxy serve --port 7386 --anthropic`), and in another shell run `lines="$(aimux model proxy env --port 7386)" && eval "$lines"`, then `claude`.
+   - In that session: a prompt with a tool call on a Claude model; `/model` to a `codex:` model and a prompt that refers to the first; `/model` back and a prompt that refers to both. Expected: three answers that recall what came before, `aimux cost --session <id>` showing both engines, two `switch` lines in the ledger.
+   - Stop the dev proxy and send a prompt, to see what a dead proxy looks like; `eval "$(aimux model proxy env --off)"` returns the shell to going direct.
+   - Either accept the latency figures in the evidence note or ask for the plan's twenty-turn measure.
+   - Then add `--anthropic` to the stable proxy's job and run `aimux upgrade model-proxy`.
 2. Whether evals resume right after stage 1 for the parts that need only the turn id.
 3. Whether the hook may ever refuse a tool call. Slice 3 is report-only whatever the answer.
 4. Whether there is a source for Claude's remaining allowance. Without one the limit error is the only trigger.
