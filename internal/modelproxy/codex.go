@@ -87,14 +87,26 @@ func NewCodexBackend(opts CodexOptions) *CodexBackend {
 	}
 }
 
+// process returns the running app-server, starting it when there is none. The start time is logged here, where
+// Codex is really started, so it is right whoever asked first: Start, the usage poller or a request. It is
+// written after the lock is released, so a stalled log reader cannot hold up the backend.
 func (b *CodexBackend) process(ctx context.Context) (*appServer, error) {
+	p, started, err := b.processLocked(ctx)
+	if err == nil && started > 0 && b.stderr != nil {
+		_, _ = fmt.Fprintf(b.stderr, "model proxy: Codex started in %dms\n", started.Milliseconds())
+	}
+	return p, err
+}
+
+// processLocked also reports how long a start took, or zero when the process was already running.
+func (b *CodexBackend) processLocked(ctx context.Context) (*appServer, time.Duration, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if b.closed {
-		return nil, errors.New("codex backend is closed")
+		return nil, 0, errors.New("codex backend is closed")
 	}
 	if b.server != nil {
 		select {
@@ -102,7 +114,7 @@ func (b *CodexBackend) process(ctx context.Context) (*appServer, error) {
 			b.server = nil
 			b.current.Store(nil)
 		default:
-			return b.server, nil
+			return b.server, 0, nil
 		}
 	}
 	began := time.Now()
@@ -110,7 +122,7 @@ func (b *CodexBackend) process(ctx context.Context) (*appServer, error) {
 	// Without the lean catalog Codex would offer its own tools (exec, apply_patch, sub-agents), so refuse to start.
 	catalog, err := writeLeanCatalog(ctx, b.command)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if b.catalogPath != "" {
 		_ = os.Remove(b.catalogPath)
@@ -118,7 +130,7 @@ func (b *CodexBackend) process(ctx context.Context) (*appServer, error) {
 	b.catalogPath = catalog
 	mcpArgs, err := disabledMCPArgs(ctx, b.command)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	args := []string{"app-server", "--enable", "omit_skill_descriptions", "-c", "model_catalog_json=" + strconv.Quote(catalog)}
 	args = append(args, mcpArgs...)
@@ -136,7 +148,7 @@ func (b *CodexBackend) process(ctx context.Context) (*appServer, error) {
 		"-c", "include_apps_instructions=false")
 	p, err := startAppServer(b.command, args, b.stderr)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	initCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -145,20 +157,15 @@ func (b *CodexBackend) process(ctx context.Context) (*appServer, error) {
 		"capabilities": map[string]bool{"experimentalApi": true},
 	}, nil); err != nil {
 		p.close()
-		return nil, err
+		return nil, 0, err
 	}
 	if err := p.send(initCtx, 0, "initialized", nil); err != nil {
 		p.close()
-		return nil, err
+		return nil, 0, err
 	}
 	b.server = p
 	b.current.Store(p)
-	// Logged here, where Codex is really started, so the time is right whoever asked first: Start, the usage
-	// poller or a request.
-	if b.stderr != nil {
-		_, _ = fmt.Fprintf(b.stderr, "model proxy: Codex started in %dms\n", time.Since(began).Milliseconds())
-	}
-	return p, nil
+	return p, max(time.Since(began), time.Nanosecond), nil
 }
 
 // Start brings app-server up ahead of the first request. A failure is said on stderr and is not fatal to the
