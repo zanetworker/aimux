@@ -531,7 +531,7 @@ func daemonReadsHTTP(status func() (StatusReport, error), version string, needed
 	if binary == "" {
 		binary = "the binary its launchd job runs"
 	}
-	return fmt.Errorf("the running proxy is aimux %s (launchd runs %s), not this %s, and may not read the HTTP servers' definitions; update that binary to this version and run `aimux mcp proxy restart`, or reinstall from this binary (`aimux mcp proxy install` run from it); nothing was changed", rep.Version, binary, version)
+	return fmt.Errorf("the running proxy is aimux %s (launchd runs %s), not this %s, and may not read the HTTP servers' definitions; bring it to this build with `aimux upgrade mcp-proxy`; nothing was changed", rep.Version, binary, version)
 }
 
 // CheckDaemonReadsHTTP is daemonReadsHTTP for commands outside install and

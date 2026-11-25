@@ -293,7 +293,7 @@ func TestPrintInstallState_CountsRemovedDriftAndUpgrade(t *testing.T) {
 		Drifted: []string{"slack"}, Removed: []string{"minutes"}, UpgradePending: true, DaemonVersion: "v1"}
 	got := render(statusPage{addr: "a", install: &st, claudeConfig: "/home/x/.claude.json", now: statusNow, cliVersion: "v2"})
 	for _, want := range []string{"4 servers behind the proxy", "minutes", "removed from /home/x/.claude.json",
-		"drifted: slack", "upgrade restart pending (proxy v1, cli v2)", "aimux mcp proxy restart"} {
+		"drifted: slack", "upgrade restart pending (proxy v1, cli v2)", "aimux upgrade mcp-proxy"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("install section lacks %q:\n%s", want, got)
 		}
