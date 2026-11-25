@@ -38,6 +38,13 @@ type (
 // the file as it was. path is the keys from the top: {"parts", "inference-proxy", "enabled"}. A file that is not
 // there is made, readable by its owner only.
 func Set(file string, path []string, value any) error {
+	return update(file, func(data []byte) ([]byte, error) { return Edit(data, path, value) })
+}
+
+// update reads the config file, hands its text to change, and writes what comes back in its place: under a lock,
+// through a temporary file, to the file a link points at, and only if nobody saved the file meanwhile. An error
+// from change, or text returned unchanged, writes nothing.
+func update(file string, change func(data []byte) ([]byte, error)) error {
 	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
 		return err
 	}
@@ -80,7 +87,7 @@ func Set(file string, path []string, value any) error {
 			mode = info.Mode().Perm()
 		}
 	}
-	edited, err := Edit(data, path, value)
+	edited, err := change(data)
 	if err != nil || bytes.Equal(edited, data) {
 		return err
 	}

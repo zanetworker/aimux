@@ -279,3 +279,59 @@ func TestSetupCheckJSON(t *testing.T) {
 		t.Fatalf("setup --check --apply: %v\n%s", err, text)
 	}
 }
+
+// The engine commands against a scratch home: the file is changed, read back by list, and --check then says what
+// the services would need. Nothing is applied: there is no job in a scratch home.
+func TestEngineCommands(t *testing.T) {
+	home := t.TempDir()
+	run := func(args ...string) (string, error) {
+		cmd := exec.Command(binaryPath, args...)
+		cmd.Env = append(os.Environ(), "HOME="+home)
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+	if out, err := run("engine", "enable", "anthropic", "--no-apply"); err != nil {
+		t.Fatalf("engine enable: %v\n%s", err, out)
+	}
+	if out, err := run("engine", "add", "lab=https://gw.example", "--no-apply"); err != nil {
+		t.Fatalf("engine add: %v\n%s", err, out)
+	}
+	if out, err := run("engine", "disable", "lab", "--no-apply"); err != nil {
+		t.Fatalf("engine disable: %v\n%s", err, out)
+	}
+	out, err := run("engine", "list", "--json")
+	if err != nil {
+		t.Fatalf("engine list --json: %v\n%s", err, out)
+	}
+	var report struct {
+		Engines []struct {
+			Name string `json:"name"`
+			On   bool   `json:"on"`
+			Type string `json:"type"`
+			URL  string `json:"url"`
+		} `json:"engines"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, out)
+	}
+	got := map[string]bool{}
+	for _, e := range report.Engines {
+		got[e.Name] = e.On
+		if e.Name == "lab" && (e.URL != "https://gw.example" || e.Type != "messages") {
+			t.Errorf("lab = %+v", e)
+		}
+	}
+	if !got["codex"] || !got["anthropic"] || got["lab"] {
+		t.Errorf("engines on = %v; want codex and anthropic on, lab off", got)
+	}
+	if out, err := run("engine", "disable", "codex", "--no-apply"); err == nil || !strings.Contains(out, "cannot be turned off") {
+		t.Errorf("engine disable codex: %v\n%s", err, out)
+	}
+	if out, err := run("enable", "nope", "--no-apply"); err == nil || !strings.Contains(out, "inference-proxy") {
+		t.Errorf("enable nope: %v\n%s", err, out)
+	}
+	// With a part stated and no job on this scratch machine, --check has nothing it would change.
+	if out, err := run("setup", "--check"); err != nil || !strings.Contains(out, "be left alone") {
+		t.Errorf("setup --check: %v\n%s", err, out)
+	}
+}

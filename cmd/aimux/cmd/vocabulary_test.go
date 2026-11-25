@@ -34,11 +34,16 @@ var bannedVerbs = map[string]string{
 // tools add and tools remove are the owner-approved shape of the tools
 // noun (plan 2a): a source is added to and removed from tool-sources.yaml,
 // not created or deleted. mcp proxy edit predates the check of nested
-// commands.
+// commands. engine add and engine remove are the owner-approved shape of the
+// engine noun (stage 2 plan, decision 1): an engine of the owner's own is
+// added to and removed from the parts section of the config file, as a
+// tool source is, while enable and disable switch one that exists.
 var verbExemptions = map[string]bool{
 	"tools add":      true,
 	"tools remove":   true,
 	"mcp proxy edit": true,
+	"engine add":     true,
+	"engine remove":  true,
 }
 
 var bannedFlags = map[string]string{
