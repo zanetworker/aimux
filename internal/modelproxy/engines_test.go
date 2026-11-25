@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -233,7 +234,7 @@ func TestHandler_AnthropicAnswerWithoutUsage(t *testing.T) {
 func TestHandler_CodexModelWithoutTheKeyIsRefused(t *testing.T) {
 	p := newTwoEngines(t)
 	res := p.send(t, "/v1/messages", "codex:gpt-6.2-sol", "0b61f1d5-no-key", "hello", map[string]string{"Authorization": callersLogin})
-	if res.Code != http.StatusUnauthorized || !strings.Contains(res.Body.String(), "followed by /k/ and the proxy key") {
+	if res.Code != http.StatusUnauthorized || !strings.Contains(res.Body.String(), `eval \"$(aimux model proxy env)\"`) {
 		t.Fatalf("HTTP %d: %s", res.Code, res.Body)
 	}
 	if strings.Contains(res.Body.String(), "the-callers-login") {
@@ -487,5 +488,108 @@ func TestLedger_ARefusedAddressLeavesNoTrace(t *testing.T) {
 	lines := p.lines(t)
 	if len(lines) != 2 || lines[0].Kind != ledger.KindModelCall || lines[1].Kind != ledger.KindModelCall || lines[1].Turn != "2" {
 		t.Fatalf("ledger = %+v; want two Codex calls, turns 1 and 2, and no switch", lines)
+	}
+}
+
+func TestHealthz_NamesTheEngines(t *testing.T) {
+	engines := func(handler http.Handler) []string {
+		res := httptest.NewRecorder()
+		handler.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+		var live Liveness
+		if err := json.Unmarshal(res.Body.Bytes(), &live); err != nil {
+			t.Fatal(err)
+		}
+		return live.Engines
+	}
+	if got := engines(newLedgerProxy(t).handler); len(got) != 1 || got[0] != engineCodex {
+		t.Errorf("without the option: %v", got)
+	}
+	if got := engines(newTwoEngines(t).handler); len(got) != 2 || got[0] != engineCodex || got[1] != engineAnthropic {
+		t.Errorf("with the Anthropic engine on: %v", got)
+	}
+}
+
+func TestSessionEnv(t *testing.T) {
+	got := SessionEnv(7385, "it's/a key")
+	want := []string{`export ANTHROPIC_BASE_URL='http://127.0.0.1:7385/k/it%27s%2Fa%20key'`, "unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN"}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("SessionEnv = %q, want %q", got, want)
+	}
+	if off := SessionEnvOff(); len(off) != 1 || off[0] != "unset ANTHROPIC_BASE_URL" {
+		t.Errorf("SessionEnvOff = %q", off)
+	}
+}
+
+func TestHealthz_ProvesItHoldsTheKey(t *testing.T) {
+	server := httptest.NewServer(newTwoEngines(t).handler)
+	t.Cleanup(server.Close)
+	port := server.Listener.Addr().(*net.TCPAddr).Port
+	ask := func(query string) Liveness {
+		resp, err := http.Get(server.URL + "/healthz" + query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		body, _ := io.ReadAll(resp.Body)
+		var live Liveness
+		if err := json.Unmarshal(body, &live); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(body), testKey) {
+			t.Fatalf("the answer holds the key: %s", body)
+		}
+		return live
+	}
+	if live := ask(""); live.Proof != "" {
+		t.Errorf("a proof without a challenge: %q", live.Proof)
+	}
+	live := ask("?challenge=nonce-1")
+	if live.Proof == "" || live.Proof != LivenessProof(testKey, "nonce-1", port) {
+		t.Errorf("proof = %q", live.Proof)
+	}
+	for name, other := range map[string]string{
+		"another key": LivenessProof("another-key", "nonce-1", port), "another nonce": LivenessProof(testKey, "nonce-2", port),
+		"another port": LivenessProof(testKey, "nonce-1", port+1),
+	} {
+		if live.Proof == other {
+			t.Errorf("the proof is the same for %s", name)
+		}
+	}
+	if err := CheckSessionProxy(live, testKey, "nonce-1", port); err != nil {
+		t.Errorf("the real proxy's answer is refused: %v", err)
+	}
+	// The same answer, relayed by something listening elsewhere, proves nothing about that listener.
+	if err := CheckSessionProxy(live, testKey, "nonce-1", port+1); !errors.Is(err, ErrNotTheProxy) {
+		t.Errorf("a relayed answer was accepted: %v", err)
+	}
+	if long := ask("?challenge=" + strings.Repeat("x", 300)); long.Proof != "" {
+		t.Error("an overlong challenge was answered")
+	}
+}
+
+func TestCheckSessionProxy(t *testing.T) {
+	good := Liveness{Service: LivenessService, Status: "ok", Engines: []string{engineCodex, engineAnthropic}, Proof: LivenessProof(testKey, "n", 7385)}
+	if err := CheckSessionProxy(good, testKey, "n", 7385); err != nil {
+		t.Errorf("a proxy with both engines and the right proof: %v", err)
+	}
+	for name, tc := range map[string]struct {
+		change func(*Liveness)
+		want   error
+	}{
+		"another service":           {func(l *Liveness) { l.Service = "something-else" }, ErrNotTheProxy},
+		"no proof":                  {func(l *Liveness) { l.Proof = "" }, ErrNotTheProxy},
+		"a proof for another key":   {func(l *Liveness) { l.Proof = LivenessProof("another-key", "n", 7385) }, ErrNotTheProxy},
+		"a proof for another nonce": {func(l *Liveness) { l.Proof = LivenessProof(testKey, "m", 7385) }, ErrNotTheProxy},
+		"a proof for another port":  {func(l *Liveness) { l.Proof = LivenessProof(testKey, "n", 7386) }, ErrNotTheProxy},
+		"codex only":                {func(l *Liveness) { l.Engines = []string{engineCodex} }, ErrNoAnthropicEngine},
+	} {
+		live := good
+		tc.change(&live)
+		if err := CheckSessionProxy(live, testKey, "n", 7385); !errors.Is(err, tc.want) {
+			t.Errorf("%s: err = %v, want %v", name, err, tc.want)
+		}
+	}
+	if err := CheckSessionProxy(good, "", "n", 7385); !errors.Is(err, ErrNotTheProxy) {
+		t.Error("an empty key proves nothing")
 	}
 }

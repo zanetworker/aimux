@@ -2,7 +2,12 @@ package modelproxy
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
+	"slices"
 	"sync"
 	"time"
 )
@@ -148,6 +153,44 @@ type Liveness struct {
 	LedgerSeq    uint64 `json:"ledger_seq,omitempty"`
 	LedgerFailed uint64 `json:"ledger_failed,omitempty"`
 	LedgerOff    bool   `json:"ledger_off,omitempty"`
+	// Engines are the engines this proxy can answer with: "codex", and "anthropic" when it was started with it.
+	// A build from before there was a second engine names none.
+	Engines []string `json:"engines,omitempty"`
+	// Proof answers a challenge sent as ?challenge=<nonce>: LivenessProof of the proxy's key and that nonce. It
+	// shows the answer came from a process that holds the key, without the key going either way.
+	Proof string `json:"proof,omitempty"`
+}
+
+// maxChallenge bounds the nonce the keyless health answer will sign.
+const maxChallenge = 128
+
+// LivenessProof is what a proxy holding key, listening on port, answers to the challenge nonce. The port is the
+// one the proxy accepted the connection on, so an answer relayed from the proxy on another port does not pass
+// for an answer from this one.
+func LivenessProof(key, nonce string, port int) string {
+	mac := hmac.New(sha256.New, []byte(key))
+	_, _ = fmt.Fprintf(mac, "aimux-model-proxy-liveness:%d:%s", port, nonce)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// Why a listener cannot be given a shell's sessions.
+var (
+	ErrNotTheProxy       = errors.New("the listener did not show it is the model proxy that holds the key")
+	ErrNoAnthropicEngine = errors.New("the model proxy runs without its Anthropic engine")
+)
+
+// CheckSessionProxy reports whether live, the answer to a challenge with nonce sent to port, came from the model
+// proxy that holds key, listens on that port, and can answer with both engines. Only then may a session be pointed at it: the session will send it
+// the key, the owner's Claude login and every conversation.
+func CheckSessionProxy(live Liveness, key, nonce string, port int) error {
+	proven := key != "" && nonce != "" && hmac.Equal([]byte(live.Proof), []byte(LivenessProof(key, nonce, port)))
+	if live.Service != LivenessService || !proven {
+		return ErrNotTheProxy
+	}
+	if !slices.Contains(live.Engines, engineAnthropic) {
+		return ErrNoAnthropicEngine
+	}
+	return nil
 }
 
 // liveness keeps only the fields Liveness allows from a full health report.

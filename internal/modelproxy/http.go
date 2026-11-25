@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 
 	"github.com/zanetworker/aimux/internal/ledger"
@@ -72,6 +73,16 @@ func NewHandler(backend Backend, key string, options ...HandlerOption) http.Hand
 			live := liveness(reporter.health())
 			stats := config.ledger.Stats()
 			live.LedgerSeq, live.LedgerFailed, live.LedgerOff = stats.Seq, stats.Failed, config.ledgerOff
+			if nonce := r.URL.Query().Get("challenge"); nonce != "" && len(nonce) <= maxChallenge && key != "" {
+				// The port this connection was accepted on, not one the request names.
+				if local, ok := r.Context().Value(http.LocalAddrContextKey).(*net.TCPAddr); ok {
+					live.Proof = LivenessProof(key, nonce, local.Port)
+				}
+			}
+			live.Engines = []string{engineCodex}
+			if config.anthropic != nil {
+				live.Engines = append(live.Engines, engineAnthropic)
+			}
 			_ = writeJSON(w, http.StatusOK, live)
 			return
 		}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -134,8 +135,18 @@ func (env statusEnv) readModelStatus(ctx context.Context, row *controller.Servic
 }
 
 func readModelLiveness(ctx context.Context, addr string) (modelproxy.Liveness, error) {
+	return challengeModelLiveness(ctx, addr, "")
+}
+
+// challengeModelLiveness reads the keyless health answer, asking the proxy to prove with nonce that it holds the
+// key (modelproxy.CheckSessionProxy checks the proof). An empty nonce asks for no proof.
+func challengeModelLiveness(ctx context.Context, addr, nonce string) (modelproxy.Liveness, error) {
 	var live modelproxy.Liveness
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+addr+"/healthz", nil)
+	target := "http://" + addr + "/healthz"
+	if nonce != "" {
+		target += "?challenge=" + url.QueryEscape(nonce)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		return live, err
 	}

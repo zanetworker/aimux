@@ -63,7 +63,7 @@ With it on, the proxy decides who answers from two things a request carries, nev
 | The request names | and carries | Answered by |
 |---|---|---|
 | a `codex:` model | the proxy key | Codex |
-| a `codex:` model | no proxy key | nobody: 401, saying the session needs the proxy key in its base URL |
+| a `codex:` model | no proxy key | nobody: 401, with the command that starts a session with the key |
 | any other model | the caller's own Claude login | Anthropic |
 | any other model | the proxy key and no login | Codex, as before: the default Codex model answers |
 
@@ -72,6 +72,28 @@ A request to Anthropic is sent to `https://api.anthropic.com` and nowhere else, 
 The two credentials are different things. The proxy key says a caller may use what the proxy itself holds: the owner's Codex login, and the proxy's own routes such as `GET /health`, which stays local and still needs the key. The Claude login is the caller's own, and the proxy only passes it on to Anthropic. A request that is only passed on needs no proxy key: the login alone is enough, since the caller could have sent it to Anthropic directly.
 
 A session that uses both engines has to present both, and `Authorization` is taken by the login. So the proxy key can also travel as the first part of the path: a base URL of `http://127.0.0.1:7385/k/<key>` puts it on every request. This way of presenting the key works whether or not `--anthropic` is given. The proxy removes that part before anything else reads the path. A wrong key there is refused even when a login is present, and so is the prefix spelled with percent escapes. A request whose address holds the key anywhere else is not sent to Anthropic.
+
+### Point a shell at the proxy
+
+```bash
+lines="$(aimux model proxy env)" && eval "$lines"   # the stable proxy; --port 7386 for the dev channel
+```
+
+Go on only when that succeeded; a failure prints why and changes nothing. Then, from the same shell:
+
+```bash
+claude --model claude-sonnet-5-5           # answered by Anthropic, on your Claude login
+claude --model codex:gpt-6.2-sol           # answered by Codex
+eval "$(aimux model proxy env --off)"      # back to Anthropic directly
+```
+
+`aimux model proxy env` prints two lines for the shell: it sets `ANTHROPIC_BASE_URL` to the proxy's address with the key as its prefix, and unsets `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` so Claude Code uses your Claude login. It says nothing about the model; a session uses whatever model you give it. Sessions started from that shell, and the sessions they start, go through the proxy. Other shells are untouched.
+
+The first line is written in two steps on purpose. `eval "$(aimux model proxy env)"` also works, but when the command fails it prints nothing, `eval` of nothing succeeds, and the next `claude` would run outside the proxy without saying so. With `&&` a failure stops there.
+
+The output holds the proxy key. The command refuses to print it to a terminal, and a shell with tracing on (`set -x`) would print the line as it runs it, so turn tracing off first.
+
+Before it prints anything, the command checks what is listening on the port, because a session pointed there will send it the key, your Claude login and every conversation. It sends a random challenge to the keyless `GET /healthz` and accepts only an answer signed with the proxy key and the port it was asked on (`proof`), which another program on that port cannot produce, even by passing the question on to the real proxy elsewhere; the key itself is not sent. The check is made once, when the command runs. The same answer lists the proxy's `engines`. It prints nothing, and fails, when nothing proves to be the proxy, when the proxy was started without `--anthropic`, or when the shell is set for another provider (`CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, `CLAUDE_CODE_USE_FOUNDRY`), which would make Claude Code ignore the base URL. `--off` prints the line that unsets `ANTHROPIC_BASE_URL`, the one variable that held the key, and needs no running proxy.
 
 Other paths Claude Code calls, such as `HEAD /api/hello`, are forwarded to Anthropic when the request carries a login, and are not found otherwise, as before.
 
