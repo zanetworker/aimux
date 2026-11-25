@@ -210,6 +210,7 @@ func startStdioIn(ctx context.Context, server string, cfg ServerConfig, expand b
 		}
 		select {
 		case <-drained:
+		case <-ctx.Done():
 		case <-time.After(stderrDrainWait):
 		}
 	}

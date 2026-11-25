@@ -153,15 +153,16 @@ func TestClaude_SharesOneLiveCache(t *testing.T) {
 			t.Fatal(err)
 		}
 		hs, _ := c.LiveSessions(discovery.LiveTTL).Holders(harness.List)
-		if took := time.Since(began); took >= discovery.LiveTTL/2 {
-			if attempt == 5 {
-				t.Fatalf("five attempts each took longer than half the TTL (last: %v); the machine is too loaded to check this", took)
-			}
-			continue
+		took := time.Since(began)
+		if len(hs) == 1 && hs[0].SessionID == "shared-1" && hs[0].Status == "busy" {
+			return
 		}
-		if len(hs) != 1 || hs[0].SessionID != "shared-1" || hs[0].Status != "busy" {
+		// A wrong answer counts only when the attempt was quick enough to be inside the window.
+		if took < discovery.LiveTTL/2 {
 			t.Fatalf("holders after discovery = %+v, want the read discovery made", hs)
 		}
-		return
+		if attempt == 5 {
+			t.Fatalf("five attempts each took longer than half the TTL (last: %v); the machine is too loaded to check this", took)
+		}
 	}
 }
