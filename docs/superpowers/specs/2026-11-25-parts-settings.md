@@ -23,7 +23,6 @@ parts:
       enmaas:
         type: messages
         url: https://api.enmaas.devshift.net
-        enabled: true
         key: {keychain: {item: enmaas-key}}
         enabled: true
   mcp-proxy:
