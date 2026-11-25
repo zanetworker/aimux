@@ -56,6 +56,14 @@ func TestCost_ByModelAndByDay(t *testing.T) {
 	if got := out.String(); !strings.Contains(got, "MODEL              ASKED AS") || strings.Contains(got, "SERVED") || !strings.Contains(got, "claude-haiku-5-5") || !strings.Contains(got, "in the last 7d") {
 		t.Fatalf("by model:\n%s", got)
 	}
+	// By model the engine that served each model is named, where the other views name the served models.
+	report.Rows[0].Engines = []string{"codex"}
+	out.Reset()
+	_ = writeCost(&out, report, controller.MeterByModel, "7d", false)
+	if got := out.String(); !strings.Contains(got, "ASKED AS          ENGINE  CALLS") || !strings.Contains(got, "claude-haiku-5-5  codex ") {
+		t.Fatalf("by model, with engines:\n%s", got)
+	}
+	report.Rows[0].Engines = nil
 	out.Reset()
 	report.Rows[0].Key, report.Rows[0].Models = "2026-11-25", []string{"codex:gpt-6.2-sol"}
 	_ = writeCost(&out, report, controller.MeterByDay, "all", false)

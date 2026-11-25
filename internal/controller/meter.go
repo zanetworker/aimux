@@ -40,6 +40,7 @@ type MeterRow struct {
 	Estimated    bool     `json:"estimated,omitempty"` // a call in the row had estimated usage
 	Models       []string `json:"models,omitempty"`    // served models, sorted; left out when the key is the model
 	Asked        []string `json:"asked,omitempty"`     // models the client named, sorted
+	Engines      []string `json:"engines,omitempty"`   // engines that answered, sorted
 }
 
 // MeterReport is the ledger's model calls, summed, with what could not be counted said beside them.
@@ -101,7 +102,7 @@ func Meter(dir string, opts MeterOptions) (MeterReport, error) {
 		}
 	}
 	rows := map[string]*MeterRow{}
-	served, asked := map[string]map[string]bool{}, map[string]map[string]bool{}
+	served, asked, engines := map[string]map[string]bool{}, map[string]map[string]bool{}, map[string]map[string]bool{}
 	note := func(set map[string]map[string]bool, key, model string) {
 		if model == "" {
 			return
@@ -142,6 +143,7 @@ func Meter(dir string, opts MeterOptions) (MeterReport, error) {
 		}
 		note(served, key, l.ResponseModel)
 		note(asked, key, l.RequestModel)
+		note(engines, key, l.Engine)
 	}
 	names := func(set map[string]bool) []string {
 		out := make([]string, 0, len(set))
@@ -156,6 +158,9 @@ func Meter(dir string, opts MeterOptions) (MeterReport, error) {
 			row.Models = names(served[key])
 		}
 		row.Asked = names(asked[key])
+		if len(engines[key]) > 0 {
+			row.Engines = names(engines[key])
+		}
 		report.Rows = append(report.Rows, *row)
 	}
 	slices.SortFunc(report.Rows, func(a, b MeterRow) int {

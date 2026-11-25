@@ -202,3 +202,70 @@ func TestMapRequestRejectsRenamedToolCollision(t *testing.T) {
 		t.Fatalf("got %v, want a collision error", err)
 	}
 }
+
+// A conversation that ran on Anthropic can hold blocks only Anthropic produces: a web search it ran itself, say.
+// Claude Code resends the whole history, so refusing one would end the session on Codex for good.
+func TestMapRequestKeepsGoingPastBlocksOnlyAnthropicMakes(t *testing.T) {
+	request := messageRequest{Model: "codex:gpt-6.2-sol", Messages: []conversationMessage{
+		conversation("user", `"what is new?"`),
+		conversation("assistant", `[
+			{"type":"text","text":"Searching."},
+			{"type":"server_tool_use","id":"srvtoolu_1","name":"web_search","input":{"query":"SECRET-QUERY"}},
+			{"type":"web_search_tool_result","tool_use_id":"srvtoolu_1","content":[{"type":"web_search_result","title":"SECRET-TITLE"}]},
+			{"type":"text","text":"Here it is."}]`),
+		conversation("user", `"and then?"`),
+	}}
+	turn, err := mapRequest(request)
+	if err != nil {
+		t.Fatalf("mapRequest: %v", err)
+	}
+	history, _ := json.Marshal(turn.History)
+	for _, want := range []string{"Searching.", "Here it is.", "[server_tool_use omitted: the Codex backend did not receive this block]", "[web_search_tool_result omitted: the Codex backend did not receive this block]"} {
+		if !strings.Contains(string(history), want) {
+			t.Errorf("history lacks %q: %s", want, history)
+		}
+	}
+	for _, leak := range []string{"SECRET-QUERY", "SECRET-TITLE"} {
+		if strings.Contains(string(history), leak) {
+			t.Errorf("history holds %q from a block that was left out", leak)
+		}
+	}
+}
+
+func TestMapRequestStillRefusesAnUnknownBlockFromTheUser(t *testing.T) {
+	for name, messages := range map[string][]conversationMessage{
+		"in the prompt":  {conversation("user", `[{"type":"mystery","data":"x"}]`)},
+		"in the history": {conversation("user", `[{"type":"mystery","data":"x"}]`), conversation("assistant", `"ok"`), conversation("user", `"next"`)},
+	} {
+		if _, err := mapRequest(messageRequest{Messages: messages}); err == nil || !strings.Contains(err.Error(), "unsupported content block") {
+			t.Errorf("%s: err = %v; what the user sends is never dropped silently", name, err)
+		}
+	}
+	// A type that is not a plain name is not repeated in the note.
+	turn, err := mapRequest(messageRequest{Messages: []conversationMessage{
+		conversation("user", `"hi"`), conversation("assistant", `[{"type":"odd type <b>"}]`), conversation("user", `"next"`),
+	}})
+	history, _ := json.Marshal(turn.History)
+	if err != nil || strings.Contains(string(history), "odd type") || !strings.Contains(string(history), "[block omitted:") {
+		t.Errorf("err %v, history %s", err, history)
+	}
+}
+
+// A tool the provider runs itself is declared with a type and no input schema. Codex cannot be given one.
+func TestMapRequestLeavesOutToolsOnlyTheProviderRuns(t *testing.T) {
+	var request messageRequest
+	if err := json.Unmarshal([]byte(`{"model":"codex:gpt-6.2-sol",
+		"tools":[{"type":"web_search_20250305","name":"web_search","max_uses":5},
+		         {"name":"Bash","description":"run","input_schema":{"type":"object"}},
+		         {"name":"nothing","input_schema":null}],
+		"messages":[{"role":"user","content":"hi"}]}`), &request); err != nil {
+		t.Fatal(err)
+	}
+	turn, err := mapRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(turn.Tools) != 1 || turn.Tools[0].Name != "Bash" || len(turn.ToolNames) != 1 {
+		t.Fatalf("tools = %+v, names = %v; want only the one with an input schema", turn.Tools, turn.ToolNames)
+	}
+}

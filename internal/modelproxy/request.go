@@ -1,6 +1,7 @@
 package modelproxy
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,6 +35,16 @@ type messageRequest struct {
 // imageNote stands in for an image: rejecting the request would fail every later request of the session, because
 // Claude Code resends the whole history.
 const imageNote = "[image omitted: the Codex backend did not receive this image]"
+
+// omittedBlockNote stands in for an assistant block Codex has no form for. Rejecting the request would fail every
+// later request of the session, as with an image. The kind is named only when it reads as a plain name.
+func omittedBlockNote(kind string) string {
+	name := "block"
+	if ledgerID(kind) != "" {
+		name = kind
+	}
+	return "[" + name + " omitted: the Codex backend did not receive this block]"
+}
 
 // codexEfforts are the reasoning efforts Claude Code and Codex share; anything else runs at high.
 var codexEfforts = map[string]bool{"low": true, "medium": true, "high": true, "xhigh": true, "max": true}
@@ -155,6 +166,11 @@ func mapRequest(req messageRequest) (TurnRequest, error) {
 	}
 	turn.ToolNames = make(map[string]string, len(req.Tools))
 	for _, tool := range req.Tools {
+		if schema := bytes.TrimSpace(tool.InputSchema); len(schema) == 0 || string(schema) == "null" {
+			// A tool the provider runs itself (Anthropic's web search) is declared with no input schema. Codex
+			// cannot be given it, and would refuse the whole conversation over it.
+			continue
+		}
 		name := codexToolName(tool.Name)
 		if other, ok := turn.ToolNames[name]; ok {
 			return turn, fmt.Errorf("tool names %q and %q collide as %q for codex", other, tool.Name, name)
@@ -249,7 +265,12 @@ func mapRequest(req messageRequest) (TurnRequest, error) {
 				}{"function_call_output", block.ToolUseID, output})
 			case "thinking", "redacted_thinking":
 			default:
-				return turn, fmt.Errorf("unsupported content block %q", block.Type)
+				if msg.Role != "assistant" {
+					return turn, fmt.Errorf("unsupported content block %q", block.Type)
+				}
+				// A block an earlier engine produced and this one has no form for: a search Anthropic ran
+				// itself, for one. Only its kind is passed on, never what it held.
+				text = append(text, textPart{Type: textType, Text: omittedBlockNote(block.Type)})
 			}
 		}
 		flush()

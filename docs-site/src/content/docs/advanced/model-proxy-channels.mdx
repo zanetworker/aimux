@@ -75,6 +75,8 @@ A session that uses both engines has to present both, and `Authorization` is tak
 
 Other paths Claude Code calls, such as `HEAD /api/hello`, are forwarded to Anthropic when the request carries a login, and are not found otherwise, as before.
 
+A session can change engine from one request to the next, by naming another model. The conversation travels with each request, so the new engine reads what the other one wrote. One thing does not carry over to Codex: a block only Anthropic produces, such as a search it ran itself. Codex is given a short note in its place, naming the kind of block and nothing it held, and a tool only Anthropic can run is left out of the tools Codex is offered.
+
 An Anthropic call writes a ledger line like a Codex call, with `aimux.engine` set to `anthropic`, the model Anthropic said answered, and the token counts from its answer. When an answer carries no token counts, an error for example, the line says so, and `aimux cost` reports how many such calls there were instead of counting them as zero.
 
 The request history records an Anthropic call with the outcome `forwarded`. `aimux model proxy stats` was written for Codex conversations and lists every outcome it does not know under fallbacks, so forwarded calls appear there for now. Appearing there says nothing went wrong and nothing was sent twice; a forwarded call that did fail is counted as a failure like any other.

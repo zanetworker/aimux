@@ -2,6 +2,7 @@ package modelproxy
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -275,7 +276,8 @@ func describeTail(messages []inputMessage, pending int) string {
 		}
 		kinds := make([]string, 0, len(msg.blocks))
 		for _, block := range msg.blocks {
-			kinds = append(kinds, block.Type)
+			// The kind as the caller wrote it only when it reads as a plain name: this line is printed.
+			kinds = append(kinds, cmp.Or(ledgerID(block.Type), "other"))
 		}
 		shapes = append(shapes, msg.role+":"+strings.Join(kinds, ","))
 	}
