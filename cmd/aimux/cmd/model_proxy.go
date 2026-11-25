@@ -86,6 +86,7 @@ func newModelProxyStatsCmd() *cobra.Command {
 func newModelProxyServeCmd() *cobra.Command {
 	var port int
 	var command, serviceTier string
+	var anthropic bool
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Serve the Codex model proxy on 127.0.0.1",
@@ -163,6 +164,13 @@ func newModelProxyServeCmd() *cobra.Command {
 			} else {
 				handlerOptions = append(handlerOptions, modelproxy.WithLedgerOff())
 			}
+			if anthropic {
+				option, err := modelproxy.WithAnthropic(modelproxy.AnthropicUpstream)
+				if err != nil {
+					return err
+				}
+				handlerOptions = append(handlerOptions, option)
+			}
 			if port == modelproxy.StablePort {
 				home, err := os.UserHomeDir()
 				if err != nil {
@@ -186,6 +194,8 @@ func newModelProxyServeCmd() *cobra.Command {
 	}
 	cmd.Flags().IntVar(&port, "port", modelproxy.StablePort, "Port on 127.0.0.1 (clients send the key stored in the "+modelproxy.KeyService+" Keychain entry)")
 	cmd.Flags().StringVar(&command, "codex-command", "", "Codex executable (default: codex-lean if available, otherwise codex)")
+	cmd.Flags().BoolVar(&anthropic, "anthropic", false,
+		"Also forward to Anthropic: a request that carries the caller's own Claude login and names a model other than codex:* goes to "+modelproxy.AnthropicUpstream+" unchanged. Requests with only the proxy key are answered by Codex as before")
 	cmd.Flags().StringVar(&serviceTier, "service-tier", modelproxy.ServiceTierPriority,
 		"OpenAI service tier: priority is Codex's Fast tier (about twice the tokens a second, spending the plan's allowance faster); standard leaves Codex's own default")
 	return cmd

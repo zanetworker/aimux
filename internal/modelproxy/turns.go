@@ -71,25 +71,35 @@ type turnState struct {
 	prompts int
 	last    uint64
 	used    uint64
+	// engine answered the session's last main-conversation request; empty when that is not known.
+	engine string
 }
 
 // next reports the turn a request belongs to, as a decimal number, or "" when there is no session or nothing is
 // known of it yet. side: the request is off the main conversation and takes the session's current turn.
 // startsTurn, prompts and last are requestShape's answers.
 func (t *turns) next(session string, side, startsTurn bool, prompts int, last uint64) string {
+	turn, _ := t.nextOn(session, side, startsTurn, prompts, last, "")
+	return turn
+}
+
+// nextOn is next for a request that engine will answer. switchedFrom is the engine that answered the session's
+// last main-conversation request when it was a different one, and empty otherwise: a side request, a session's
+// first request, and the same engine again are not switches.
+func (t *turns) nextOn(session string, side, startsTurn bool, prompts int, last uint64, engine string) (turn, switchedFrom string) {
 	if session == "" {
-		return ""
+		return "", ""
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	state := t.sessions[session]
 	if side {
 		if state == nil || state.turn == 0 {
-			return ""
+			return "", ""
 		}
 		t.clock++
 		state.used = t.clock
-		return strconv.Itoa(state.turn)
+		return strconv.Itoa(state.turn), ""
 	}
 	t.clock++
 	if state == nil {
@@ -111,7 +121,13 @@ func (t *turns) next(session string, side, startsTurn bool, prompts int, last ui
 		// A tool result going back, or the same request sent again.
 		state.turn = max(state.turn, prompts)
 	}
-	return strconv.Itoa(state.turn)
+	if engine != "" {
+		if state.engine != "" && state.engine != engine {
+			switchedFrom = state.engine
+		}
+		state.engine = engine
+	}
+	return strconv.Itoa(state.turn), switchedFrom
 }
 
 // forgetOldest drops the session used longest ago when the table is over its bound.
@@ -148,6 +164,9 @@ func (t *turns) seed(lines []ledger.Line) {
 		}
 		t.clock++
 		state.turn, state.used = max(state.turn, number), t.clock
+		if !line.Side && line.Engine != "" {
+			state.engine = line.Engine // lines are in the order written, so the last one stands
+		}
 		t.forgetOldest()
 	}
 }

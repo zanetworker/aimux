@@ -110,7 +110,7 @@ Use the Claude Code or Codex built-in history instead if you run one agent at a 
 | Set up everything missing, then check it | `aimux setup` (runs only missing steps), `aimux doctor` (read-only, one fix per problem) |
 | Check the background services | `aimux status` (model proxy, MCP proxy, tool gateway, collector; one fix per problem; exit 1 when one needs attention) |
 | Bring the model proxy, the MCP proxy and the collector to this build | `aimux upgrade` (the tool gateway is not moved yet and is listed with its own command; copies this build into each service's own folder, restarts it, and puts the previous build back if it does not answer; `--dry-run` to see the plan) |
-| See what your sessions spent | `aimux cost` (model calls and tokens from the ledger, per session, model or day; `--since 7d`, `--by model`, `--session <id>`; what could not be counted is listed, never shown as zero) |
+| See what your sessions spent | `aimux cost` (model calls and tokens from the ledger, per session, model or day; `--since 7d`, `--by model`, `--session <id>`; what could not be counted is listed, never shown as zero, including calls whose answer carried no token figures) |
 | See what a profile allows | `aimux profile list`, `aimux profile show work-readonly`, `aimux profile check <name>` |
 
 <details>

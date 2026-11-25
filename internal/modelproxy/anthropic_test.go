@@ -157,6 +157,7 @@ func TestAnthropicEngine_KeyHeaders(t *testing.T) {
 		"the proxy key as a bearer token is removed":     {"Authorization", "Bearer " + testProxyKey, ""},
 		"a value with the key anywhere in it is removed": {"Referer", "http://127.0.0.1:7385/k/" + testProxyKey + "/v1/messages", ""},
 		"a cookie holding the key is removed":            {"Cookie", "k=" + testProxyKey, ""},
+		"an escaped key in an address is removed":        {"Referer", "http://127.0.0.1:7385/k/" + strings.ReplaceAll(testProxyKey, "-", "%2D") + "/v1/messages", ""},
 		"a client that takes no compression gets none":   {"Accept-Encoding", "identity", "identity"},
 		"a client that refuses gzip is not sent it":      {"Accept-Encoding", "br, gzip;q=0", "identity"},
 		"gzip with a weight is still gzip":               {"Accept-Encoding", "br;q=1.0, GZIP;q=0.5", "gzip"},
@@ -479,6 +480,16 @@ func TestAnthropicEngine_NeverSendsElsewhere(t *testing.T) {
 	for _, sent := range requests {
 		if sent.Host != strings.TrimPrefix(upstream.URL, "http://") || !strings.HasPrefix(sent.Path, "/") {
 			t.Errorf("upstream got Host %q path %q", sent.Host, sent.Path)
+		}
+	}
+}
+
+func TestUnescapeWhatItCan(t *testing.T) {
+	for in, want := range map[string]string{
+		"plain": "plain", "a%2Fb": "a/b", "%6b%6B": "kk", "bad%ZZ%41": "bad%ZZA", "end%4": "end%4", "end%": "end%", "%41": "A", "": "",
+	} {
+		if got := unescapeWhatItCan(in); got != want {
+			t.Errorf("unescapeWhatItCan(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

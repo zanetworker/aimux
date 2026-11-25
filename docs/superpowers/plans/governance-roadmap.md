@@ -37,7 +37,7 @@ Three things hold on the way there:
 
 | | |
 |---|---|
-| In progress | Stage 3: a second engine, by choice (plan: `2026-11-25-stage-3-second-engine.md`). Tasks 1 and 2 of six are done: the proxy key travels as a path prefix in the base URL (`../specs/2026-11-25-second-engine-evidence.md`), and the Anthropic engine forwards a request unchanged and reads its token figures (`internal/modelproxy/anthropic.go`; nothing calls it yet). Task 3, choosing the engine per request, is next |
+| In progress | Stage 3: a second engine, by choice (plan: `2026-11-25-stage-3-second-engine.md`). Done: the key travels as a path prefix (task 1, `../specs/2026-11-25-second-engine-evidence.md`); the Anthropic engine (task 2); the proxy chooses the engine per request and writes `switch` lines, behind `aimux model proxy serve --anthropic`, off by default (task 3). On a spare port one real session ran a tool call on Anthropic, continued on Codex and went back, remembering across both. Left of task 3: the merged model list, the engine column in `aimux cost`, and one known limit to fix first: a conversation holding Anthropic server-tool blocks (a web search made on Anthropic) is refused by the Codex mapper when it continues on Codex. Then task 4, `aimux model proxy env` |
 | Also open | Stage 1 is built and recording; it closes after a day of real use (task 5 of `2026-11-25-stage-1-ledger.md`) |
 | Next | Stage 2 follows stage 3 |
 | Waiting on the owner | Nothing that blocks; see "Waiting on the owner" |
@@ -160,7 +160,7 @@ Base items from the product-shape draft: B1 the registry of parts, B2 the servic
 14. That a hook counting prompts in the transcript reaches the model proxy's turn number (slice 3). The rule is in `../specs/2026-11-25-turn-identity.md`.
 3. That Codex hooks receive a call id the model proxy also sees (slice 3).
 4. The cost of the reporting hook per tool call (slice 3).
-5. A transcript written under Codex, continued on Anthropic (8a).
+5. A transcript written under Codex, continued on Anthropic (8a). Seen once on 2026-11-25, on a spare port: a session's third turn ran on Anthropic after a Codex turn and recalled a word from the first. Not yet seen: a long session, or one with tool calls made under Codex.
 6. Whether a held Codex conversation can be given turns another engine produced (8e).
 7. That Anthropic's prompt cache still matches after turns spent on another engine (8e).
 8. Quality of each model inside this harness, per role (stage 4 onward; eval cases are the source).

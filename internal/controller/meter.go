@@ -44,11 +44,14 @@ type MeterRow struct {
 
 // MeterReport is the ledger's model calls, summed, with what could not be counted said beside them.
 type MeterReport struct {
-	Rows       []MeterRow              `json:"rows"` // most tokens first; days newest first
-	Total      MeterRow                `json:"total"`
-	Unmatched  int                     `json:"unmatched"` // model calls with no session: in no row and not in Total
-	Skipped    int                     `json:"skipped"`   // lines of another ledger version
-	Torn       int                     `json:"torn"`      // lines that are not whole
+	Rows      []MeterRow `json:"rows"` // most tokens first; days newest first
+	Total     MeterRow   `json:"total"`
+	Unmatched int        `json:"unmatched"` // model calls with no session: in no row and not in Total
+	Skipped   int        `json:"skipped"`   // lines of another ledger version
+	Torn      int        `json:"torn"`      // lines that are not whole
+	// NoUsage is how many counted calls carried no token figures. They are in Requests, and add nothing to the
+	// token sums, which are short by whatever those calls used.
+	NoUsage    int                     `json:"no_usage"`
 	Gaps       map[string][]ledger.Gap `json:"gaps,omitempty"`
 	Incomplete bool                    `json:"incomplete"` // Skipped, Torn or Gaps is not empty
 	// Files is how many ledger files were read. Zero means nothing has written a ledger here yet, which is not
@@ -123,6 +126,9 @@ func Meter(dir string, opts MeterOptions) (MeterReport, error) {
 		if row == nil {
 			row = &MeterRow{Key: key}
 			rows[key] = row
+		}
+		if l.UsageUnknown {
+			report.NoUsage++
 		}
 		for _, sum := range []*MeterRow{row, &report.Total} {
 			sum.Requests++

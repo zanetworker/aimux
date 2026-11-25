@@ -40,9 +40,11 @@ func LedgerName(port int) string {
 	return fmt.Sprintf("model-proxy-%d", port)
 }
 
-// startModelCall fills in what is known when a request arrives: who it belongs to and what was asked for. The
-// turn is taken now, so calls are numbered in the order they arrived, not the order they finished.
-func startModelCall(table *turns, r *http.Request, request messageRequest, turn TurnRequest) *ledger.Line {
+// startModelCall fills in what is known when a request arrives: who it belongs to, what was asked for and which
+// engine will answer. The turn is taken now, so calls are numbered in the order they arrived, not the order they
+// finished. responseModel is the model that will answer when the proxy already knows it. change is a switch line
+// to write first, when the session's main conversation was last answered by another engine; otherwise nil.
+func startModelCall(table *turns, r *http.Request, request messageRequest, engine, responseModel, effort string) (call, change *ledger.Line) {
 	// Read from the metadata whatever model was named: the proxy keeps a Codex thread only for requests that name
 	// a codex: model, but every request belongs to its session.
 	metadataSession := metadataSessionID(request.Metadata)
@@ -55,11 +57,18 @@ func startModelCall(table *turns, r *http.Request, request messageRequest, turn 
 	if strings.HasPrefix(r.Header.Get("User-Agent"), "claude-cli") {
 		harness = "claude-code"
 	}
+	turn, from := table.nextOn(session, side, startsTurn, prompts, last, engine)
+	if from != "" {
+		change = &ledger.Line{
+			At: time.Now(), Kind: ledger.KindSwitch, Session: session, Turn: turn, Harness: harness,
+			FromEngine: from, ToEngine: engine,
+		}
+	}
 	return &ledger.Line{
 		Kind: ledger.KindModelCall, Session: session, Side: side, Agent: agent,
-		Turn: table.next(session, side, startsTurn, prompts, last), Call: "mc_" + rand.Text(), Harness: harness,
-		RequestModel: ledgerModel(request.Model), ResponseModel: "codex:" + turn.Model, Engine: "codex", Effort: ledgerID(turn.Effort),
-	}
+		Turn: turn, Call: "mc_" + rand.Text(), Harness: harness,
+		RequestModel: ledgerModel(request.Model), ResponseModel: responseModel, Engine: engine, Effort: ledgerID(effort),
+	}, change
 }
 
 // ledgerID lets an id from a request into the ledger only when it looks like one. A line holds ids, never text,
@@ -90,9 +99,10 @@ func ledgerModel(name string) string {
 // finishModelCall adds how the call went. failure is the request history's word for what went wrong, or empty.
 func finishModelCall(call *ledger.Line, started time.Time, firstByte time.Duration, usage Usage, failure string) {
 	call.At = started
-	// The ledger's input tokens are the whole prompt; the proxy's usage keeps the cached part apart.
-	call.InputTokens = int64(usage.InputTokens) + int64(usage.CacheReadInputTokens)
+	// The ledger's input tokens are the whole prompt; the proxy's usage keeps the cached parts apart.
+	call.InputTokens = int64(usage.InputTokens) + int64(usage.CacheReadInputTokens) + int64(usage.CacheCreationInputTokens)
 	call.CacheRead = int64(usage.CacheReadInputTokens)
+	call.CacheWrite = int64(usage.CacheCreationInputTokens)
 	call.OutputTokens = int64(usage.OutputTokens)
 	call.Estimated = usage.estimated
 	call.TTFBMillis = firstByte.Milliseconds()

@@ -40,15 +40,44 @@ A line says how a call went and never what it said. It holds the session id, a t
 | `session` | The harness's session id, in full. Taken from the request's metadata, or from the `X-Claude-Code-Session-Id` header |
 | `turn` | The user request this call was made for, counted from 1 per session. Every model call made for one request, a subagent's included, carries the same number |
 | `aimux.side`, `aimux.agent` | The call came from a subagent (with its id) or carried no session in its metadata |
-| `gen_ai.request.model`, `gen_ai.response.model` | The model named by the client, and the one that answered. A Claude model name is answered by the default Codex model, and both are kept |
+| `gen_ai.request.model`, `gen_ai.response.model` | The model named by the client, and the one that answered. On Codex, a Claude model name is answered by the default Codex model, and both are kept |
 | `gen_ai.usage.input_tokens` | The whole prompt. The part read from a cache is included, and also given as `aimux.usage.cache_read_input_tokens` |
+| `aimux.usage.cache_write_input_tokens` | The part of the prompt written to a cache, also included in the input tokens. Anthropic reports it; Codex does not |
+| `aimux.usage.unknown` | The answer carried no token figures, so the counts on this line are absent, not zero |
 | `aimux.outcome` | `ok`, or the same word the request history uses for a failure |
 
-A request the proxy rejects before Codex sees it is not a model call and writes no line.
+A line of kind `switch` is written when a session's main conversation is answered by another engine than its previous request was: it carries the session, the turn, `aimux.from_engine` and `aimux.to_engine`. A subagent's call on another engine is not a switch.
+
+A request the proxy rejects before an engine sees it is not a model call and writes no line.
 
 Writing the line never changes the answer: it happens after the response, and a write that fails is counted, not reported to the client. `aimux model proxy status` shows a `Ledger` row (`latest line 1840`, or `latest line 1840, 3 not written`, or `off` when the file could not be opened at start), and `aimux status` lists a lost line or a ledger that is off under what needs attention. The keyed `GET /health` carries them as a `ledger` object (`seq`, `failed`, `off`), and the keyless `GET /healthz` as `ledger_seq`, `ledger_failed` and `ledger_off`.
 
 The request history and `aimux model proxy stats` are unchanged.
+
+## A second engine: Anthropic
+
+`aimux model proxy serve --anthropic` adds a second engine. It is off unless the flag is given, and with it off nothing below applies.
+
+With it on, the proxy decides who answers from two things a request carries, never from the prompt: the model it names, and its credentials.
+
+| The request names | and carries | Answered by |
+|---|---|---|
+| a `codex:` model | the proxy key | Codex |
+| a `codex:` model | no proxy key | nobody: 401, saying the session needs the proxy key in its base URL |
+| any other model | the caller's own Claude login | Anthropic |
+| any other model | the proxy key and no login | Codex, as before: the default Codex model answers |
+
+A request to Anthropic is sent to `https://api.anthropic.com` and nowhere else, with its body unchanged, and the answer comes back unchanged. The caller's login travels in `Authorization` as Claude Code sent it; the proxy does not keep it, log it or write it to the ledger. The proxy key is removed before the request leaves, so Anthropic never sees it. Redirects are not followed.
+
+The two credentials are different things. The proxy key says a caller may use what the proxy itself holds: the owner's Codex login, and the proxy's own routes such as `GET /health`, which stays local and still needs the key. The Claude login is the caller's own, and the proxy only passes it on to Anthropic. A request that is only passed on needs no proxy key: the login alone is enough, since the caller could have sent it to Anthropic directly.
+
+A session that uses both engines has to present both, and `Authorization` is taken by the login. So the proxy key can also travel as the first part of the path: a base URL of `http://127.0.0.1:7385/k/<key>` puts it on every request. This way of presenting the key works whether or not `--anthropic` is given. The proxy removes that part before anything else reads the path. A wrong key there is refused even when a login is present, and so is the prefix spelled with percent escapes. A request whose address holds the key anywhere else is not sent to Anthropic.
+
+Other paths Claude Code calls, such as `HEAD /api/hello`, are forwarded to Anthropic when the request carries a login, and are not found otherwise, as before.
+
+An Anthropic call writes a ledger line like a Codex call, with `aimux.engine` set to `anthropic`, the model Anthropic said answered, and the token counts from its answer. When an answer carries no token counts, an error for example, the line says so, and `aimux cost` reports how many such calls there were instead of counting them as zero.
+
+The request history records an Anthropic call with the outcome `forwarded`. `aimux model proxy stats` was written for Codex conversations and lists every outcome it does not know under fallbacks, so forwarded calls appear there for now. Appearing there says nothing went wrong and nothing was sent twice; a forwarded call that did fail is counted as a failure like any other.
 
 ## Speed
 

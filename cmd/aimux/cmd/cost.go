@@ -144,6 +144,9 @@ func writeCost(out io.Writer, report controller.MeterReport, by controller.Meter
 	if report.Total.Estimated {
 		notes = append(notes, "~ usage was estimated for some of these calls")
 	}
+	if report.NoUsage > 0 {
+		notes = append(notes, plural(report.NoUsage, "call", "calls")+" carried no token figures (counted as requests; their tokens are in no sum)")
+	}
 	if report.Unmatched > 0 {
 		notes = append(notes, plural(report.Unmatched, "call", "calls")+" with no session (counted in no row and not in the total)")
 	}

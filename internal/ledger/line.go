@@ -55,12 +55,18 @@ type Line struct {
 	Effort        string `json:"aimux.effort,omitempty"`
 	// InputTokens is the whole prompt, as OpenTelemetry defines the name: what was read from a cache is part of
 	// it, and is also given on its own in CacheRead.
-	InputTokens  int64  `json:"gen_ai.usage.input_tokens,omitempty"`
-	OutputTokens int64  `json:"gen_ai.usage.output_tokens,omitempty"`
-	CacheRead    int64  `json:"aimux.usage.cache_read_input_tokens,omitempty"`
-	CacheWrite   int64  `json:"aimux.usage.cache_write_input_tokens,omitempty"`
-	Estimated    bool   `json:"aimux.usage.estimated,omitempty"`
+	InputTokens  int64 `json:"gen_ai.usage.input_tokens,omitempty"`
+	OutputTokens int64 `json:"gen_ai.usage.output_tokens,omitempty"`
+	CacheRead    int64 `json:"aimux.usage.cache_read_input_tokens,omitempty"`
+	CacheWrite   int64 `json:"aimux.usage.cache_write_input_tokens,omitempty"`
+	Estimated    bool  `json:"aimux.usage.estimated,omitempty"`
+	// UsageUnknown: the answer carried no token figures, so the zeros above are not a measurement.
+	UsageUnknown bool   `json:"aimux.usage.unknown,omitempty"`
 	TTFBMillis   int64  `json:"aimux.ttfb_ms,omitempty"` // -1: no byte was sent
 	DurationMs   int64  `json:"aimux.duration_ms,omitempty"`
 	Outcome      string `json:"aimux.outcome,omitempty"`
+
+	// A switch: the session's main conversation was answered by another engine than the time before.
+	FromEngine string `json:"aimux.from_engine,omitempty"`
+	ToEngine   string `json:"aimux.to_engine,omitempty"`
 }
