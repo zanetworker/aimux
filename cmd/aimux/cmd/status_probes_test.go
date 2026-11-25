@@ -35,7 +35,7 @@ func TestProbe_ModelProxyOK(t *testing.T) {
 	assertProbeRow(t, env, controller.ServiceStatus{
 		Name: "model proxy", State: controller.ServiceOK, Build: probeTestBuild,
 		Address: addr, StartedAt: &probeTestStartedAt, LastActivity: &lastTurn, ActivityNote: "turn",
-		RestartFix: "scripts/model-proxy-promote promote",
+		RestartFix: "aimux upgrade model-proxy",
 	})
 }
 
@@ -46,7 +46,7 @@ func TestProbe_ModelProxyDegraded(t *testing.T) {
 	assertProbeRow(t, env, controller.ServiceStatus{
 		Name: "model proxy", State: controller.ServiceDegraded, Reason: "degraded", Build: probeTestBuild,
 		Address: addr, StartedAt: &probeTestStartedAt, ActivityNote: "turn",
-		RestartFix: "scripts/model-proxy-promote promote",
+		RestartFix: "aimux upgrade model-proxy",
 		// The keyless answer has no detail; the keyed command does.
 		Attention: []controller.Attention{{Problem: "degraded", Fix: "aimux model proxy status"}},
 	})
@@ -73,7 +73,7 @@ func TestProbe_ModelProxySendsNoKey(t *testing.T) {
 
 func TestProbe_ModelProxyWithoutHealthz(t *testing.T) {
 	// An older proxy build has no keyless path: it answers 401 (key check first) or 404 there.
-	fix := "scripts/model-proxy-promote promote"
+	fix := "aimux upgrade model-proxy"
 	plists := t.TempDir()
 	if err := os.WriteFile(filepath.Join(plists, "com.aimux.model-proxy.plist"), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
@@ -97,7 +97,7 @@ func TestProbe_ModelProxyWrongService(t *testing.T) {
 	live := modelproxy.Liveness{Service: "something-else", Status: "ok", Version: probeTestBuild, StartedAt: probeTestStartedAt}
 	addr := probeHTTPServer(t, probeJSON(t, "/healthz", "", http.StatusOK, live))
 	assertProbeRow(t, statusEnv{modelAddr: addr, plistDir: t.TempDir()}, controller.ServiceStatus{
-		Name: "model proxy", Address: addr, RestartFix: "scripts/model-proxy-promote promote",
+		Name: "model proxy", Address: addr, RestartFix: "aimux upgrade model-proxy",
 		State: controller.ServiceDown, Reason: "wrong process",
 	})
 }
@@ -108,10 +108,10 @@ func TestProbe_NotInstalled(t *testing.T) {
 	gateway := filepath.Join(dir, "missing.sock")
 	env := statusEnv{modelAddr: addr, mcpAddr: addr, gatewayAddr: gateway, collectorAddr: addr, plistDir: dir}
 	rows := []controller.ServiceStatus{
-		{Name: "model proxy", Address: addr, RestartFix: "scripts/model-proxy-promote promote"},
+		{Name: "model proxy", Address: addr, RestartFix: "aimux upgrade model-proxy"},
 		{Name: "mcp proxy", Address: addr, RestartFix: "aimux mcp proxy restart"},
 		{Name: "tool gateway", Address: gateway, RestartFix: "aimux mcp proxy gateway install"},
-		{Name: "collector", Address: addr, RestartFix: "launchctl kickstart -k gui/$(id -u)/com.azaalouk.aimux-collect"},
+		{Name: "collector", Address: addr, RestartFix: "aimux upgrade collector"},
 	}
 	probes := defaultStatusProbes(env)
 	if len(probes) != len(rows) {
@@ -140,7 +140,7 @@ func TestProbe_DownNotRunning(t *testing.T) {
 	env := statusEnv{modelAddr: addr, plistDir: dir}
 	assertProbeRow(t, env, controller.ServiceStatus{
 		Name: "model proxy", State: controller.ServiceDown, Reason: "not running", Address: addr,
-		RestartFix: "scripts/model-proxy-promote promote",
+		RestartFix: "aimux upgrade model-proxy",
 	})
 }
 
@@ -156,9 +156,9 @@ func TestProbe_WrongProcess(t *testing.T) {
 			}))
 			env := statusEnv{modelAddr: addr, mcpAddr: addr, collectorAddr: addr, plistDir: t.TempDir()}
 			for _, row := range []controller.ServiceStatus{
-				{Name: "model proxy", RestartFix: "scripts/model-proxy-promote promote"},
+				{Name: "model proxy", RestartFix: "aimux upgrade model-proxy"},
 				{Name: "mcp proxy", RestartFix: "aimux mcp proxy restart"},
-				{Name: "collector", RestartFix: "launchctl kickstart -k gui/$(id -u)/com.azaalouk.aimux-collect"},
+				{Name: "collector", RestartFix: "aimux upgrade collector"},
 			} {
 				row.State, row.Reason, row.Address = controller.ServiceDown, "wrong process", addr
 				assertProbeRow(t, env, row)
@@ -176,7 +176,7 @@ func TestProbe_KeyRejected(t *testing.T) {
 			env := statusEnv{mcpAddr: addr, collectorAddr: addr, plistDir: t.TempDir()}
 			for _, row := range []controller.ServiceStatus{
 				{Name: "mcp proxy", RestartFix: "aimux mcp proxy restart"},
-				{Name: "collector", RestartFix: "launchctl kickstart -k gui/$(id -u)/com.azaalouk.aimux-collect"},
+				{Name: "collector", RestartFix: "aimux upgrade collector"},
 			} {
 				row.State, row.Reason, row.Address = controller.ServiceDown, "key rejected", addr
 				assertProbeRow(t, env, row)
@@ -226,7 +226,7 @@ func TestProbe_CollectorWrongService(t *testing.T) {
 			addr := probeHTTPServer(t, probeJSON(t, "/health", "", http.StatusOK, health))
 			env := statusEnv{collectorAddr: addr, plistDir: t.TempDir()}
 			want := controller.ServiceStatus{
-				Name: "collector", Address: addr, RestartFix: "launchctl kickstart -k gui/$(id -u)/com.azaalouk.aimux-collect",
+				Name: "collector", Address: addr, RestartFix: "aimux upgrade collector",
 			}
 			switch service {
 			case "aimux-collector":
@@ -246,7 +246,7 @@ func TestProbe_CollectorWrongService(t *testing.T) {
 func TestProbe_CollectorOlderBuildHasNoHealthAnswer(t *testing.T) {
 	// A collector from before /health existed answers 404 there. With its launchd job installed that is an
 	// older build to restart, not a stranger on the port.
-	fix := "launchctl kickstart -k gui/$(id -u)/com.azaalouk.aimux-collect"
+	fix := "aimux upgrade collector"
 	plists := t.TempDir()
 	if err := os.WriteFile(filepath.Join(plists, "com.azaalouk.aimux-collect.plist"), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)

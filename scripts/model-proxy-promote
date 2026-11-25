@@ -2,9 +2,32 @@
 set -euo pipefail
 
 bin_dir=$HOME/go/bin
-stable=$bin_dir/aimux
-previous=$stable.prev
-dev=$stable-dev
+# The stable binary is the file the job runs: the CLI in ~/go/bin, or the service's own copy once
+# `aimux upgrade` has moved the job there. The build it replaces is kept beside it.
+job_file=$HOME/Library/LaunchAgents/com.aimux.model-proxy.plist
+# launchd runs Program when the job has one; otherwise the first argument. A job file that names neither is not
+# one this script can promote into. Only a missing job file falls back to the CLI.
+resolve_stable() {
+  if [[ -e $job_file ]]; then
+    stable=$(/usr/libexec/PlistBuddy -c 'Print :Program' "$job_file" 2>/dev/null) ||
+      stable=$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:0' "$job_file" 2>/dev/null) ||
+      { printf 'Cannot read the program from %s\n' "$job_file" >&2; exit 1; }
+  else
+    stable=$bin_dir/aimux
+  fi
+  # This script replaces that file. A job started through a wrapper or an interpreter names something else there.
+  [[ ${stable##*/} == aimux ]] || { printf 'The job runs %s, not an aimux binary; refusing to replace it\n' "$stable" >&2; exit 1; }
+  previous=$stable.prev
+}
+resolve_stable
+# The restart below is a kickstart, which runs what launchd has loaded. If that is not the file the job file
+# names, the checks would pass against the wrong program.
+loaded_matches_job_file() {
+  local loaded
+  loaded=$(launchctl print "$job" 2>/dev/null | sed -n 's/^[[:space:]]*program = //p' | head -1)
+  [[ -z $loaded || $loaded == "$stable" ]]
+}
+dev=$bin_dir/aimux-dev
 job=gui/$(id -u)/com.aimux.model-proxy
 hud_repo=$HOME/go/src/github.com/zanetworker/claude-hud
 hud_root=$HOME/.claude/claude-hud-pins
@@ -13,7 +36,7 @@ die() { printf '%s\n' "$*" >&2; exit 1; }
 
 # Stage beside the destination so replacing a running binary is one rename.
 replace_binary() (
-  staged=$(mktemp "$bin_dir/.aimux-swap.XXXXXX")
+  staged=$(mktemp "$(dirname "$2")/.aimux-swap.XXXXXX")
   trap 'rm -f "$staged"' EXIT
   cp -p "$1" "$staged" && mv -f "$staged" "$2"
 )
@@ -126,9 +149,12 @@ main() {
       ;;
   esac
   lock=$bin_dir/.aimux-model-proxy-promotion
-  mkdir "$lock" || die "Another promotion or rollback is in progress (lock: $lock)."
+  mkdir "$lock" || die "Another promotion, rollback or upgrade is in progress (lock: $lock)."
   trap 'rollback_if_armed; if [[ -n "$dev_pid" ]]; then kill "$dev_pid" 2>/dev/null || true; wait "$dev_pid" || true; fi; rm -rf "$scratch"; rmdir "$lock"' EXIT
   launchctl print "$job" >/dev/null || die "The stable launchd job is not loaded: $job"
+  # Read again under the lock: an upgrade may have moved the job to its own copy since this script started.
+  resolve_stable
+  loaded_matches_job_file || die "launchd has another program loaded for $job than its job file names ($stable); an upgrade was interrupted. Run: aimux upgrade model-proxy"
   set +x
   key=$(security find-generic-password -a aimux -s aimux-model-proxy -w) || die 'The proxy Keychain entry is unavailable.'
   [[ "$key" =~ ^[a-zA-Z0-9_-]+$ ]] || die 'The proxy Keychain entry has an invalid key.'

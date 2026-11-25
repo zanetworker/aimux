@@ -55,12 +55,11 @@ func defaultStatusProbes(env statusEnv) []controller.StatusProbe {
 		env.collectorHealth = readCollectorHealth
 	}
 	return []controller.StatusProbe{
-		env.probe("model proxy", env.modelAddr, modelStatusLabel, "scripts/model-proxy-promote promote", env.readModelStatus),
+		env.probe("model proxy", env.modelAddr, modelStatusLabel, "aimux upgrade model-proxy", env.readModelStatus),
 		env.probe("mcp proxy", env.mcpAddr, proxyAgentLabel, mcpStatusRestart, env.readMCPStatus),
 		// Install rewrites the worker's launchd job and restarts it, waiting until it answers.
 		env.probe("tool gateway", env.gatewayAddr, gatewayAgentLabel, "aimux mcp proxy gateway install", env.readGatewayStatus),
-		env.probe("collector", env.collectorAddr, collectorStatusLabel,
-			"launchctl kickstart -k gui/$(id -u)/"+collectorStatusLabel, env.readCollectorStatus),
+		env.probe("collector", env.collectorAddr, collectorStatusLabel, "aimux upgrade collector", env.readCollectorStatus),
 	}
 }
 

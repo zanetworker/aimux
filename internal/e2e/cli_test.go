@@ -165,3 +165,46 @@ func TestUnknownCommand(t *testing.T) {
 		t.Error("expected non-zero exit code for unknown command")
 	}
 }
+
+// A dry-run upgrade in a home with no services lists both as not installed, changes nothing and exits 0.
+func TestUpgradeDryRunJSON(t *testing.T) {
+	home := t.TempDir()
+	cmd := exec.Command(binaryPath, "upgrade", "--dry-run", "--json")
+	cmd.Env = append(os.Environ(), "HOME="+home)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("upgrade --dry-run --json failed: %v\n%s", err, out)
+	}
+	var result struct {
+		DryRun   bool `json:"dry_run"`
+		Services []struct{ ID, Outcome string }
+		NotMoved []struct{ ID, Update string } `json:"not_moved"`
+	}
+	if err := json.Unmarshal(out, &result); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, out)
+	}
+	if !result.DryRun || len(result.Services) != 2 || result.Services[0].ID != "model-proxy" || result.Services[1].ID != "collector" {
+		t.Fatalf("unexpected services: %s", out)
+	}
+	for _, svc := range result.Services {
+		if svc.Outcome != "not installed" {
+			t.Errorf("%s: outcome %q, want not installed", svc.ID, svc.Outcome)
+		}
+	}
+	if len(result.NotMoved) != 2 || result.NotMoved[0].Update == "" {
+		t.Errorf("not_moved should name the two services upgrade leaves alone: %s", out)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".aimux", "services")); !os.IsNotExist(err) {
+		t.Errorf("a dry run wrote to the home folder: %v", err)
+	}
+}
+
+func TestUpgradeUnknownService(t *testing.T) {
+	out, err := exec.Command(binaryPath, "upgrade", "nope", "--dry-run").CombinedOutput()
+	if err == nil {
+		t.Fatal("upgrade with an unknown service should fail")
+	}
+	if !strings.Contains(string(out), `unknown service "nope"`) || !strings.Contains(string(out), "model-proxy, collector") {
+		t.Errorf("error should list the valid names: %s", out)
+	}
+}

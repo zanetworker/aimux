@@ -38,6 +38,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&jsonOutput, "json", false, "Output in JSON format")
 	rootCmd.Flags().Bool("web", false, "Launch TUI + web dashboard")
 	rootCmd.AddCommand(newStatusCmd())
+	rootCmd.AddCommand(newUpgradeCmd())
 }
 
 func Execute(version string) {

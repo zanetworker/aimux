@@ -34,6 +34,7 @@ export default defineConfig({
 						{ label: 'Wingman', slug: 'guides/wingman' },
 						{ label: 'Chat with Sessions', slug: 'guides/chat' },
 						{ label: 'Remote Access', slug: 'guides/remote-access' },
+						{ label: 'Upgrading the Services', slug: 'guides/upgrading-services' },
 						{ label: 'Troubleshooting', slug: 'guides/troubleshooting' },
 					],
 				},

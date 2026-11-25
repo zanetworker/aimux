@@ -11,7 +11,7 @@ printf candidate > "$HOME/go/bin/aimux-dev"
 chmod +x "$HOME/go/bin/aimux" "$HOME/go/bin/aimux-dev"
 
 if [[ $# == 0 ]]; then
-  for scenario in guard install hud inference interrupt; do bash "./$(basename "$0")" "$scenario"; done
+  for scenario in guard install moved hud inference interrupt; do bash "./$(basename "$0")" "$scenario"; done
   exit
 fi
 case $1 in
@@ -36,6 +36,37 @@ case $1 in
     rm "$HOME/go/bin/aimux.prev"
     if restore_previous; then exit 1; fi
     [[ $(< "$HOME/go/bin/aimux") == old ]]
+    ;;
+  moved)
+    # After `aimux upgrade` the job runs the service's own copy: the promote swaps that file, not the CLI.
+    own=$HOME/.aimux/services/model-proxy
+    mkdir -p "$own" "$HOME/Library/LaunchAgents"
+    printf service > "$own/aimux"; chmod +x "$own/aimux"
+    cat > "$HOME/Library/LaunchAgents/com.aimux.model-proxy.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.aimux.model-proxy</string>
+  <key>ProgramArguments</key><array><string>$own/aimux</string><string>model</string><string>proxy</string><string>serve</string></array>
+</dict></plist>
+PLIST
+    source "$script"
+    [[ $stable == "$own/aimux" && $previous == "$own/aimux.prev" ]] || { printf 'FAIL: stable is %s\n' "$stable" >&2; exit 1; }
+    install_candidate "$HOME/go/bin/aimux-dev"
+    [[ $(< "$own/aimux") == candidate && -x "$own/aimux" && $(< "$own/aimux.prev") == service ]] || { printf 'FAIL: the service copy was not swapped\n' >&2; exit 1; }
+    [[ $(< "$HOME/go/bin/aimux") == old && ! -e "$HOME/go/bin/aimux.prev" ]] || { printf 'FAIL: the CLI was touched\n' >&2; exit 1; }
+    restore_previous
+    [[ $(< "$own/aimux") == service ]] || { printf 'FAIL: rollback did not restore the service copy\n' >&2; exit 1; }
+    # A job with a Program key runs that file, whatever its first argument says.
+    /usr/libexec/PlistBuddy -c "Add :Program string $HOME/elsewhere/aimux" "$HOME/Library/LaunchAgents/com.aimux.model-proxy.plist"
+    [[ $(bash -c "source '$script'; printf %s \"\$stable\"") == "$HOME/elsewhere/aimux" ]] || { printf 'FAIL: Program was not honoured\n' >&2; exit 1; }
+    # A job started through a wrapper names the wrapper: it is never replaced.
+    /usr/libexec/PlistBuddy -c "Set :Program /bin/sh" "$HOME/Library/LaunchAgents/com.aimux.model-proxy.plist"
+    if out=$(bash "$script" build-dev 2>&1); then printf 'FAIL: a wrapper was accepted as the promotion target\n' >&2; exit 1; fi
+    [[ $out == *'not an aimux binary'* ]] || { printf 'FAIL: %s\n' "$out" >&2; exit 1; }
+    # A job file with no program at all is refused, not silently replaced by the CLI.
+    printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>Label</key><string>x</string></dict></plist>\n' > "$HOME/Library/LaunchAgents/com.aimux.model-proxy.plist"
+    if out=$(bash "$script" build-dev 2>&1); then printf 'FAIL: a job file with no program was accepted\n' >&2; exit 1; fi
+    [[ $out == *'Cannot read the program'* ]] || { printf 'FAIL: %s\n' "$out" >&2; exit 1; }
     ;;
   hud)
     repo=$HOME/go/src/github.com/zanetworker/claude-hud
@@ -101,6 +132,10 @@ s = http.server.HTTPServer(("127.0.0.1", 0), H); open(sys.argv[1], "w").write(st
     install_candidate "$HOME/go/bin/aimux-dev"
     rollback_if_armed
     [[ $(< "$HOME/go/bin/aimux") == candidate && ! -s "$scratch/launchctl.log" ]] || { printf 'FAIL: disarmed rollback acted\n' >&2; exit 1; }
+    # A promotion is refused when launchd has another program loaded than the job file names.
+    printf '#!/bin/sh\nprintf "\\tstate = running\\n\\tprogram = %%s\\n" "$LOADED"\n' > "$scratch/fakebin/launchctl"
+    LOADED=$stable loaded_matches_job_file || { printf 'FAIL: a matching loaded program was refused\n' >&2; exit 1; }
+    if LOADED=/somewhere/else/aimux loaded_matches_job_file; then printf 'FAIL: a different loaded program was accepted\n' >&2; exit 1; fi
     ;;
   *) exit 2 ;;
 esac

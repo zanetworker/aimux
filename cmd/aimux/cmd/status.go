@@ -35,20 +35,25 @@ func newStatusCmd() *cobra.Command {
 				return fmt.Errorf("find the home directory for service status: %w", err)
 			}
 			cfg, _ := config.Load(config.DefaultPath())
-			gateway := toolgateway.ControlClient{Path: toolgateway.ControlSocketPath(home)}
 			version := cmd.Root().Version
-			probes := defaultStatusProbes(statusEnv{
-				modelAddr:     fmt.Sprintf("127.0.0.1:%d", modelproxy.StablePort),
-				mcpAddr:       fmt.Sprintf("127.0.0.1:%d", restartPort(home, defaultPort, false)),
-				gatewayAddr:   toolgateway.ReadonlyAddr,
-				collectorAddr: fmt.Sprintf("127.0.0.1:%d", cfg.OTELReceiverPort()),
-				plistDir:      filepath.Join(home, "Library", "LaunchAgents"),
-				cliVersion:    version,
-				gatewayStatus: gateway.Status,
-			})
+			probes := defaultStatusProbes(defaultStatusEnv(home, version, cfg))
 			o := controller.ServicesOverview(ctx, version, probes, 2*time.Second)
 			return runStatus(ctx, o, cmd.OutOrStdout(), time.Now(), jsonOutput)
 		},
+	}
+}
+
+// defaultStatusEnv is where the four services are found on this machine.
+func defaultStatusEnv(home, version string, cfg config.Config) statusEnv {
+	gateway := toolgateway.ControlClient{Path: toolgateway.ControlSocketPath(home)}
+	return statusEnv{
+		modelAddr:     fmt.Sprintf("127.0.0.1:%d", modelproxy.StablePort),
+		mcpAddr:       fmt.Sprintf("127.0.0.1:%d", restartPort(home, defaultPort, false)),
+		gatewayAddr:   toolgateway.ReadonlyAddr,
+		collectorAddr: fmt.Sprintf("127.0.0.1:%d", cfg.OTELReceiverPort()),
+		plistDir:      filepath.Join(home, "Library", "LaunchAgents"),
+		cliVersion:    version,
+		gatewayStatus: gateway.Status,
 	}
 }
 
