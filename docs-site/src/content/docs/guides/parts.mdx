@@ -51,6 +51,43 @@ Three rules are worth knowing before you edit it:
 - **A setting left out means "as it is installed".** `inference-proxy: {enabled: true}` on a proxy that runs with a port you chose keeps that port. A setting you write replaces the installed one. Engines are stated together: once the file lists engines, they replace the ones the job had, and `engines:` with nothing under it means none besides Codex.
 - **No secret goes in the file.** A key is a reference to where it is kept.
 
+## Change it with a command
+
+You can edit the file yourself, or let a command change one thing in it. A command leaves the rest of the file as you wrote it: your comments, your order, your spacing.
+
+```bash
+aimux engine list                       # what the file states, and what the running proxy answers with
+aimux engine enable anthropic           # switch on an engine that exists
+aimux engine disable anthropic          # switch it off; its settings stay
+aimux engine add enmaas=https://gateway.example    # a new address that speaks the Messages API
+aimux engine remove enmaas              # forget it
+aimux enable mcp-proxy                  # a part
+aimux disable mcp-proxy
+```
+
+Two verbs for two things. `enable` and `disable` switch something that exists, and keep its settings, so a gateway turned off for a day comes back without retyping its address. `add` and `remove` are for an engine of your own, which needs a name and an address. Anthropic and Codex are built in: Anthropic is switched on, not added, and Codex is always on.
+
+Each command that changes something (all of these but `list`) changes the file, shows what that means for the services, and makes them match, asking before a restart. `--yes` agrees in advance, and `--no-apply` only changes the file, for `aimux setup --apply` to pick up later. If you answer no to the restart, or there is nobody to ask and no `--yes`, the file keeps the change and the service keeps running as it was; the command says so, exits 1, and names `aimux setup --apply` as what applies it. With `--no-apply --json` it prints `{"schema_version": 1, "changed": ..., "applied": false}`.
+
+`aimux disable <part>` records that the part is off. Stopping its service is not built yet, so the service keeps running; the command says that and exits 1, so nothing reads as done that is not. The same holds whenever the file was changed and the machine could not follow: a proxy started by hand, a job file aimux cannot edit, or a part aimux starts and stops nothing for yet (phone access, sandboxes).
+
+`aimux engine add` expects the engine's key in the secret-store entry `<name>-key`, and writes that reference into the file. When the entry is not there yet, it says so and how to create it. It never reads the key.
+
+`aimux engine list` reads the file and asks the running proxy; it changes nothing. It shows both sides, so a difference is visible:
+
+```text
+ENGINE     IN THE FILE  RUNNING  TYPE              WHERE                                          KEY
+codex      on           yes      codex-app-server  the Codex program, on your ChatGPT plan
+anthropic  on           no       messages          https://api.anthropic.com (your Claude login)
+enmaas     off          no       messages          https://gateway.example                        secret store: enmaas-key
+
+The running proxy and the file differ. To make them match: aimux setup --apply
+```
+
+When the file says nothing about engines, the column reads `not stated` and nothing is reported as differing: the proxy runs with what it was installed with. A proxy from before it listed its engines shows `-` under `RUNNING`. With `--json` it prints `{"schema_version": 1, "port": ..., "engines": [...]}`, each engine with `name`, `on`, `stated` and `type`, and where they apply `auth`, `url` and `key_at` (Codex has none of the three), and `running` when the proxy says.
+
+Stating an engine takes the inference proxy under management: the file gains `inference-proxy: enabled: true` if it was not listed. Once the file lists engines, they are the proxy's engines: one the job was started with by hand and the file does not list is dropped at the next apply, which the table shows before anything restarts.
+
 ## See what would change
 
 ```bash

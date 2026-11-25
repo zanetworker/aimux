@@ -109,6 +109,7 @@ Use the Claude Code or Codex built-in history instead if you run one agent at a 
 | Define servers and their secrets | `aimux servers discover <name> --cwd <dir>` (the variables a server reads, with a suggested reference each), `aimux servers migrate` (split `tool-sources.yaml` into `servers.yaml` and `tool-sets.yaml`) |
 | Set up everything missing, then check it | `aimux setup` (runs only missing steps), `aimux doctor` (read-only, one fix per problem) |
 | Check the background services | `aimux status` (model proxy, MCP proxy, tool gateway, collector; one fix per problem; exit 1 when one needs attention) |
+| Turn an engine of the inference proxy on or off, or add a gateway | `aimux engine enable anthropic`, `aimux engine add enmaas=https://gateway.example`, `aimux engine disable enmaas`, `aimux engine remove enmaas`; `aimux enable <part>` and `aimux disable <part>` for a part. Each of these changes one thing in `~/.aimux/config.yaml`, keeps your comments, and makes the service match, asking before a restart. `aimux engine list` only reads: what the file states beside what the running proxy answers with. Turning a part off is recorded in the file and not carried out yet: the service keeps running and the command says so and exits 1 ([guide](docs-site/src/content/docs/guides/parts.mdx)) |
 | Say in one file which parts are on, and have the services match | `parts:` in `~/.aimux/config.yaml`; `aimux setup --check` shows what would change, `aimux setup --apply` does it, changing only the arguments that come from the settings and putting a job file back when its service does not answer ([guide](docs-site/src/content/docs/guides/parts.mdx)) |
 | Bring the model proxy, the MCP proxy and the collector to this build | `aimux upgrade` (the tool gateway is not moved yet and is listed with its own command; copies this build into each service's own folder, restarts it, and puts the previous build back if it does not answer; `--dry-run` to see the plan) |
 | Use Claude and Codex models in one Claude Code session, both counted | `aimux model proxy serve --anthropic`, then `eval "$(aimux model proxy env)"` in the shell you start sessions from: a Claude model is answered by Anthropic on your own login, a `codex:` model by Codex. `eval "$(aimux model proxy env --off)"` undoes it. `--messages-upstream name=address` adds another Messages API address, such as an internal gateway, reached as `<name>:<model>` and paid for with its own key, read from the secret-store entry `<name>-key` by default (`--messages-upstream-key` says where else it is kept) |
@@ -126,7 +127,10 @@ chat           Send a message to an existing Claude session and stream the reply
 collect        Run headless OTEL collector
 configs        List named agent configurations
 cost           Show what your sessions spent: model calls and tokens from the ledger
+disable        Turn a part of aimux off
 doctor         Read-only checks of tools, router, port 7390, Wingman serve, sandbox and gateway, each problem with its fix; exit 1 on any failure
+enable         Turn a part of aimux on
+engine         See and change which engines the inference proxy answers with
 environments   List configured environments
 export         Export a session trace
 feedback       Send feedback about the CLI

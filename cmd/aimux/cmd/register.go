@@ -64,6 +64,7 @@ func RegisterAll(d Deps) {
 	rootCmd.AddCommand(newSandboxCmd())
 	rootCmd.AddCommand(newRouterCmd())
 	rootCmd.AddCommand(newSetupCmd())
+	rootCmd.AddCommand(newEngineCmd(), newEnableCmd(), newDisableCmd())
 	rootCmd.AddCommand(newDoctorCmd())
 
 	// Build trace parser map for export command, converting function types.

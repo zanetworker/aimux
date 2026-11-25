@@ -95,6 +95,12 @@ type setupPartsOpts struct {
 	ask func(prompt string) bool
 }
 
+// errNeedsYes is a restart with nobody to ask about it: no service was touched.
+var errNeedsYes = errors.New("not applied")
+
+// errNotAgreed is the owner answering no to a restart: no service was touched.
+var errNotAgreed = errors.New("no service was changed")
+
 // errPartsWouldChange is --check finding something to do: exit 1, as a script can test.
 var errPartsWouldChange = errors.New("the services do not match the settings yet; aimux setup --apply makes them")
 
@@ -163,10 +169,10 @@ func runSetupParts(ctx context.Context, configPath string, services []controller
 	if len(restarting) > 0 && !o.yes {
 		question := fmt.Sprintf("\nRestart the %s now? Turns in flight on it end. [y/N] ", strings.Join(restarting, " and the "))
 		if o.ask == nil {
-			return fmt.Errorf("this restarts the %s; run it again with --yes to agree", strings.Join(restarting, " and the "))
+			return fmt.Errorf("%w: this restarts the %s; run aimux setup --apply --yes to agree", errNeedsYes, strings.Join(restarting, " and the "))
 		}
 		if !o.ask(question) {
-			return errors.New("nothing was changed")
+			return errNotAgreed
 		}
 		// The question may have stood open a while: what is applied is the file as it is now, and only when
 		// that is still the plan that was shown.

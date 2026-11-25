@@ -118,7 +118,7 @@ func TestSetupParts_ApplyAsksBeforeARestart(t *testing.T) {
 	var out bytes.Buffer
 	// Nobody to ask and no --yes: refused, with how to agree.
 	err := runSetupParts(context.Background(), path, services, setupPartsOpts{apply: true}, &out)
-	if err == nil || !strings.Contains(err.Error(), "--yes") || job.reloads() != 0 {
+	if !errors.Is(err, errNeedsYes) || !strings.Contains(err.Error(), "aimux setup --apply --yes") || job.reloads() != 0 {
 		t.Fatalf("err = %v", err)
 	}
 	// Asked, and the answer is no.
