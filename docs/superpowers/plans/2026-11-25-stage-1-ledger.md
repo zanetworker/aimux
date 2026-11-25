@@ -316,6 +316,7 @@ type MeterRow struct {
 	OutputTokens int64    `json:"output_tokens"`
 	Estimated    bool     `json:"estimated,omitempty"` // any call in the row had estimated usage
 	Models       []string `json:"models,omitempty"`    // served models, sorted, when the row is not by model
+	Asked        []string `json:"asked,omitempty"`     // models the client named, sorted
 }
 type MeterReport struct {
 	Rows       []MeterRow              `json:"rows"`  // most tokens first
@@ -330,7 +331,7 @@ type MeterReport struct {
 func Meter(dir string, opts MeterOptions) (MeterReport, error)
 ```
 
-- CLI: `aimux cost [--since 24h] [--by session|model|day] [--session <id>] [--json]`. Default `--since 24h`. Exit 0; exit 2 on a bad flag value. Table columns: the key (`SESSION`, `MODEL` or `DAY`), `MODELS`, `CALLS`, `IN`, `CACHED`, `OUT`, `COST`. `COST` reads `unpriced` on every row until prices exist (slice 5). A session key is cut to its first 8 characters in the table and is whole in `--json`. Under the table, one line each when non-zero: `N calls with no session`, `N lines skipped (another ledger version)`, `N lines missing from <writer> (seq a to b)`, and `totals are incomplete` when `Incomplete`.
+- CLI: `aimux cost [--since 24h] [--by session|model|day] [--session <id>] [--json]`. Default `--since 24h`. Exit 0; exit 2 on a bad flag value. Table columns: the key (`SESSION`, `MODEL` or `DAY`), `ASKED` (the models the client named), `SERVED` (the models that answered; left out when the key is the model), `CALLS`, `IN`, `CACHED`, `OUT`, `COST`. `ASKED` is what shows a Claude model name answered by Codex. `COST` reads `unpriced` on every row until prices exist (slice 5). A session key is cut to its first 8 characters in the table and is whole in `--json`. Under the table, one line each when non-zero: `N calls with no session`, `N lines skipped (another ledger version)`, `N lines missing from <writer> (seq a to b)`, and `totals are incomplete` when `Incomplete`.
 
 - [ ] **Step 1: Write the failing controller tests** in `meter_test.go`, with real files written through `ledger.OpenWriter`:
 
@@ -338,7 +339,7 @@ func Meter(dir string, opts MeterOptions) (MeterReport, error)
 func TestMeter_SumsBySession(t *testing.T)
 // session A: 2 calls (1200+800 in, 90000 cached, 40+60 out, one failed); session B: 1 call.
 // rows[0] is A with Requests 2, Failed 1, InputTokens 2000, CachedTokens 90000, OutputTokens 100,
-// Models ["codex:gpt-6.2-sol"]; Total.Requests 3.
+// Models ["codex:gpt-6.2-sol"], Asked ["claude-sonnet-5-5", "codex:gpt-6.2-sol"]; Total.Requests 3.
 
 func TestMeter_ByModelUsesTheServedModel(t *testing.T)
 // two calls asking "claude-sonnet-5-5" and "codex:gpt-6.2-sol", both served by "codex:gpt-6.2-sol": one row.
