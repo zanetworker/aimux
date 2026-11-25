@@ -780,7 +780,7 @@ func TestInstallStatus_UpgradeRestartPending(t *testing.T) {
 	}
 	fx.out.Reset()
 	fx.in.PrintInstallStatus(st)
-	if !strings.Contains(fx.out.String(), "upgrade restart pending") || !strings.Contains(fx.out.String(), "aimux mcp proxy restart") {
+	if !strings.Contains(fx.out.String(), "upgrade restart pending") || !strings.Contains(fx.out.String(), "aimux upgrade mcp-proxy") {
 		t.Fatalf("output:\n%s", fx.out.String())
 	}
 	fx.daemonVersion = "1.2.0"
@@ -1503,8 +1503,8 @@ func TestRestart_DaemonThatDoesNotComeBackIsAnError(t *testing.T) {
 
 func TestUpgradeText_PointsAtRestart(t *testing.T) {
 	fx := newInstallFX(t, fixtureClaude, fixtureSettings)
-	if txt := fx.in.UpgradeText("v1"); !strings.Contains(txt, "aimux mcp proxy restart") {
-		t.Fatalf("upgrade text %q does not point at aimux mcp proxy restart", txt)
+	if txt := fx.in.UpgradeText("v1"); !strings.Contains(txt, "aimux upgrade mcp-proxy") {
+		t.Fatalf("upgrade text %q does not point at aimux upgrade mcp-proxy", txt)
 	}
 }
 

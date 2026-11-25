@@ -109,7 +109,7 @@ func TestProbe_NotInstalled(t *testing.T) {
 	env := statusEnv{modelAddr: addr, mcpAddr: addr, gatewayAddr: gateway, collectorAddr: addr, plistDir: dir}
 	rows := []controller.ServiceStatus{
 		{Name: "model proxy", Address: addr, RestartFix: "aimux upgrade model-proxy"},
-		{Name: "mcp proxy", Address: addr, RestartFix: "aimux mcp proxy restart"},
+		{Name: "mcp proxy", Address: addr, RestartFix: "aimux upgrade mcp-proxy"},
 		{Name: "tool gateway", Address: gateway, RestartFix: "aimux mcp proxy gateway install"},
 		{Name: "collector", Address: addr, RestartFix: "aimux upgrade collector"},
 	}
@@ -157,7 +157,7 @@ func TestProbe_WrongProcess(t *testing.T) {
 			env := statusEnv{modelAddr: addr, mcpAddr: addr, collectorAddr: addr, plistDir: t.TempDir()}
 			for _, row := range []controller.ServiceStatus{
 				{Name: "model proxy", RestartFix: "aimux upgrade model-proxy"},
-				{Name: "mcp proxy", RestartFix: "aimux mcp proxy restart"},
+				{Name: "mcp proxy", RestartFix: "aimux upgrade mcp-proxy"},
 				{Name: "collector", RestartFix: "aimux upgrade collector"},
 			} {
 				row.State, row.Reason, row.Address = controller.ServiceDown, "wrong process", addr
@@ -175,7 +175,7 @@ func TestProbe_KeyRejected(t *testing.T) {
 			}))
 			env := statusEnv{mcpAddr: addr, collectorAddr: addr, plistDir: t.TempDir()}
 			for _, row := range []controller.ServiceStatus{
-				{Name: "mcp proxy", RestartFix: "aimux mcp proxy restart"},
+				{Name: "mcp proxy", RestartFix: "aimux upgrade mcp-proxy"},
 				{Name: "collector", RestartFix: "aimux upgrade collector"},
 			} {
 				row.State, row.Reason, row.Address = controller.ServiceDown, "key rejected", addr
@@ -282,7 +282,7 @@ func TestProbe_McpRestartPending(t *testing.T) {
 	want := controller.ServiceStatus{
 		Name: "mcp proxy", State: controller.ServiceOK, Build: probeTestBuild,
 		Address: addr, StartedAt: &probeTestStartedAt, LastActivity: &lastCall, ActivityNote: "call",
-		RestartFix: "aimux mcp proxy restart",
+		RestartFix: "aimux upgrade mcp-proxy",
 	}
 	env.cliVersion = "v0.15.0-185-gdef456"
 	want.BuildNote = "restart pending"
@@ -308,7 +308,7 @@ func TestProbe_McpFailedServersAreDegraded(t *testing.T) {
 	assertProbeRow(t, statusEnv{mcpAddr: addr, plistDir: t.TempDir(), cliVersion: probeTestBuild}, controller.ServiceStatus{
 		Name: "mcp proxy", State: controller.ServiceDegraded, Build: probeTestBuild,
 		Address: addr, StartedAt: &probeTestStartedAt, ActivityNote: "call",
-		RestartFix: "aimux mcp proxy restart",
+		RestartFix: "aimux upgrade mcp-proxy",
 		Attention:  []controller.Attention{{Problem: "2 of 5 servers failed (jira, slack)", Fix: "aimux mcp proxy status"}},
 	})
 }

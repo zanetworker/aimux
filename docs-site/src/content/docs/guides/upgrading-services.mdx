@@ -1,6 +1,6 @@
 ---
 title: Upgrading the Background Services
-description: Bring the model proxy and the collector to the aimux build you just installed, with the previous build put back if the new one does not answer.
+description: Bring the model proxy, the MCP proxy and the collector to the aimux build you just installed, with the previous build put back if the new one does not answer.
 ---
 
 Installing a new `aimux` changes the command you type. The background services keep running the build they were started from until you run:
@@ -14,10 +14,10 @@ aimux upgrade to build 196
 
 SERVICE      RESULT           BUILD
 model proxy  upgraded         194 -> 196
+mcp proxy    upgraded         194 -> 196
 collector    already current  196
 
 NOTES
-mcp proxy: not moved by upgrade yet; update it with: aimux mcp proxy restart
 tool gateway: not moved by upgrade yet; update it with: aimux mcp proxy gateway install
 ```
 
@@ -32,13 +32,13 @@ For each service, one after the other:
 
 The exit code is 1 when a service was not upgraded, and its line under `NOTES` says why and whether the previous program runs again. A service you name that has no launchd job also counts as not upgraded.
 
-Restarting the model proxy ends the turns in flight on it, so run the upgrade between tasks. To see the plan without changing anything:
+Restarting the model proxy ends the turns in flight on it, and restarting the MCP proxy ends the tool calls in flight and makes each open session reconnect its MCP servers, so run the upgrade between tasks. To see the plan without changing anything:
 
 ```bash
 aimux upgrade --dry-run
 ```
 
-To upgrade one service, name it: `aimux upgrade model-proxy` or `aimux upgrade collector`. `--json` prints the same facts for a script.
+To upgrade one service, name it: `aimux upgrade model-proxy`, `aimux upgrade mcp-proxy` or `aimux upgrade collector`. `--json` prints the same facts for a script.
 
 Two limits to know before you run it:
 
@@ -63,7 +63,7 @@ model proxy: its launchd job ran /Users/you/go/bin/aimux; it now runs /Users/you
 
 That first move has one limit. The only earlier build is the file the job ran before. If you had already installed this same build over it, a failed move has no earlier build to return to, and the note says so instead of claiming a rollback. Run the first upgrade from a build you trust.
 
-After that, `aimux status` showing the model proxy or the collector on an older build than the CLI means you installed a build and have not upgraded the services yet. Its fix column says `aimux upgrade <service>`.
+After that, `aimux status` showing one of the three on an older build than the CLI means you installed a build and have not upgraded the services yet. Its fix column says `aimux upgrade <service>`.
 
 ## Going back
 
@@ -75,7 +75,7 @@ Each upgrade keeps the build it replaced as `aimux.prev` beside the service's co
 
 The two builds change places, so the same command undoes it.
 
-If the kept build is older than `aimux upgrade` itself, it has no such command. That can only be the build from before a service's first move. Put it back by hand:
+If the kept build is older than `aimux upgrade` itself, or older than the upgrade's support for that service, the command fails there. That can only be the build from before a service's first move. Put it back by hand, with the service's folder and job name:
 
 ```bash
 cd ~/.aimux/services/model-proxy
@@ -83,9 +83,16 @@ cp aimux.prev aimux.back && mv aimux.back aimux
 launchctl kickstart -k gui/$(id -u)/com.aimux.model-proxy
 ```
 
-## The services upgrade does not move yet
+## The MCP proxy and its installer
+
+`aimux mcp proxy install` used to point the proxy's job at the `aimux` that ran it. Once an upgrade has moved the proxy to its own copy, an install leaves the job there. `aimux mcp proxy restart` restarts the proxy on the build it already has; `aimux upgrade mcp-proxy` is what brings it to a new one, and it is the fix `aimux mcp proxy status` and `aimux status` name when they report `upgrade restart pending`.
+
+Run the upgrade from the `aimux` on your `PATH`, the one your Claude Code hooks run. If the hooks run an older aimux from somewhere else, that one's installer would point the job back at itself the next time you add a server; `aimux mcp proxy install` from the current build rewrites the hooks.
+
+A proxy you run by hand with `aimux mcp proxy serve` has no launchd job, so the upgrade reports it as not installed: stop it and run `serve` again from the new build.
+
+## The service upgrade does not move yet
 
 | Service | Update it with | Why it is not moved |
 |---|---|---|
-| MCP proxy | `aimux mcp proxy restart` restarts it from the program its job already names, normally the `aimux` on your `PATH`. To make its job name another program, run `aimux mcp proxy install` from that program | `aimux mcp proxy install` points its job at the `aimux` that ran it, and would move it back |
 | Tool gateway | `aimux mcp proxy gateway install` | It runs a separate copy kept for Wingman |

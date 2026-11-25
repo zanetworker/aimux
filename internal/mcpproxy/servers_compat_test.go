@@ -91,7 +91,7 @@ func TestDaemonRefusal_NamesTheLaunchdBinary(t *testing.T) {
 	fx.in.Version, fx.daemonVersion = "1.2.0", "1.1.0"
 	fx.setEntry("pypi", json.RawMessage(`{"command": "pypi-mcp", "args": []}`))
 	err := fx.in.Install(nil)
-	if err == nil || !strings.Contains(err.Error(), "/usr/local/bin/aimux") || !strings.Contains(err.Error(), "update that binary") {
+	if err == nil || !strings.Contains(err.Error(), "/usr/local/bin/aimux") || !strings.Contains(err.Error(), "aimux upgrade mcp-proxy") {
 		t.Fatalf("err = %v", err)
 	}
 }

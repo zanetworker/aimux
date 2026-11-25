@@ -34,7 +34,7 @@ type statusEnv struct {
 const (
 	modelStatusLabel     = "com.aimux.model-proxy"
 	collectorStatusLabel = "com.azaalouk.aimux-collect"
-	mcpStatusRestart     = "aimux mcp proxy restart"
+	mcpStatusRestart     = "aimux upgrade mcp-proxy"
 )
 
 var (

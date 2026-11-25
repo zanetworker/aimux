@@ -183,7 +183,7 @@ func TestUpgradeDryRunJSON(t *testing.T) {
 	if err := json.Unmarshal(out, &result); err != nil {
 		t.Fatalf("invalid JSON: %v\n%s", err, out)
 	}
-	if !result.DryRun || len(result.Services) != 2 || result.Services[0].ID != "model-proxy" || result.Services[1].ID != "collector" {
+	if !result.DryRun || len(result.Services) != 3 || result.Services[0].ID != "model-proxy" || result.Services[1].ID != "mcp-proxy" || result.Services[2].ID != "collector" {
 		t.Fatalf("unexpected services: %s", out)
 	}
 	for _, svc := range result.Services {
@@ -191,8 +191,8 @@ func TestUpgradeDryRunJSON(t *testing.T) {
 			t.Errorf("%s: outcome %q, want not installed", svc.ID, svc.Outcome)
 		}
 	}
-	if len(result.NotMoved) != 2 || result.NotMoved[0].Update == "" {
-		t.Errorf("not_moved should name the two services upgrade leaves alone: %s", out)
+	if len(result.NotMoved) != 1 || result.NotMoved[0].Update == "" {
+		t.Errorf("not_moved should name the one service upgrade leaves alone: %s", out)
 	}
 	if _, err := os.Stat(filepath.Join(home, ".aimux", "services")); !os.IsNotExist(err) {
 		t.Errorf("a dry run wrote to the home folder: %v", err)
@@ -204,7 +204,7 @@ func TestUpgradeUnknownService(t *testing.T) {
 	if err == nil {
 		t.Fatal("upgrade with an unknown service should fail")
 	}
-	if !strings.Contains(string(out), `unknown service "nope"`) || !strings.Contains(string(out), "model-proxy, collector") {
+	if !strings.Contains(string(out), `unknown service "nope"`) || !strings.Contains(string(out), "model-proxy, mcp-proxy, collector") {
 		t.Errorf("error should list the valid names: %s", out)
 	}
 }

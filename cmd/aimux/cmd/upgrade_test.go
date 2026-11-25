@@ -157,8 +157,8 @@ func TestLaunchdJob_PointReloadsAndRefusesAProgramKey(t *testing.T) {
 
 func TestUpgradeTargets_SelectsByName(t *testing.T) {
 	all, err := upgradeTargets(nil)
-	if err != nil || strings.Join(all, ",") != "model-proxy,collector" {
-		t.Fatalf("no names: %v, %v; want both services in their fixed order", all, err)
+	if err != nil || strings.Join(all, ",") != "model-proxy,mcp-proxy,collector" {
+		t.Fatalf("no names: %v, %v; want the three services in their fixed order", all, err)
 	}
 	one, err := upgradeTargets([]string{"collector"})
 	if err != nil || strings.Join(one, ",") != "collector" {
@@ -170,14 +170,10 @@ func TestUpgradeTargets_SelectsByName(t *testing.T) {
 	}
 
 	_, err = upgradeTargets([]string{"modelproxy"})
-	if err == nil || !strings.Contains(err.Error(), `unknown service "modelproxy"`) || !strings.Contains(err.Error(), "model-proxy, collector") {
+	if err == nil || !strings.Contains(err.Error(), `unknown service "modelproxy"`) || !strings.Contains(err.Error(), "model-proxy, mcp-proxy, collector") {
 		t.Fatalf("unknown name: %v; want the valid names listed", err)
 	}
-	// The two services upgrade does not move yet say how they are updated instead.
-	_, err = upgradeTargets([]string{"mcp-proxy"})
-	if err == nil || !strings.Contains(err.Error(), "aimux mcp proxy restart") {
-		t.Fatalf("mcp-proxy: %v; want its own command named", err)
-	}
+	// The one service upgrade does not move yet says how it is updated instead.
 	_, err = upgradeTargets([]string{"tool-gateway"})
 	if err == nil || !strings.Contains(err.Error(), "aimux mcp proxy gateway install") {
 		t.Fatalf("tool-gateway: %v; want its own command named", err)
@@ -206,7 +202,6 @@ collector    already current  196
 
 NOTES
 model proxy: its launchd job ran /Users/me/go/bin/aimux; it now runs /Users/me/.aimux/services/model-proxy/aimux
-mcp proxy: not moved by upgrade yet; update it with: aimux mcp proxy restart
 tool gateway: not moved by upgrade yet; update it with: aimux mcp proxy gateway install
 `
 	if out.String() != want {
@@ -279,7 +274,7 @@ func TestWriteUpgrade_JSON(t *testing.T) {
 	if got.Build != "v0.14.0-196-gdef5678" || !got.DryRun || len(got.Services) != 2 || got.Services[0] != upgradeTestResults()[0] {
 		t.Fatalf("JSON %+v", got)
 	}
-	if len(got.NotMoved) != 2 || got.NotMoved[0].Name != "mcp proxy" || got.NotMoved[0].Update != "aimux mcp proxy restart" {
+	if len(got.NotMoved) != 1 || got.NotMoved[0].Name != "tool gateway" || got.NotMoved[0].Update != "aimux mcp proxy gateway install" {
 		t.Fatalf("not_moved %+v", got.NotMoved)
 	}
 }
@@ -323,4 +318,25 @@ func TestHoldPromotionLock(t *testing.T) {
 		t.Fatalf("taking the lock again after release: %v", err)
 	}
 	release()
+}
+
+// Once aimux upgrade has moved the MCP proxy to its own copy, a later install keeps its job there instead of
+// pointing it back at the CLI that ran the install.
+func TestProxyAgentBinary(t *testing.T) {
+	cli, own := "/Users/me/go/bin/aimux", "/Users/me/.aimux/services/mcp-proxy/aimux"
+	job, _, path := testUpgradeJob(t, upgradeTestPlist) // runs /Users/me/go/bin/aimux
+	if got := proxyAgentBinary(path, own, cli); got != cli {
+		t.Fatalf("a job on the CLI: %q, want the CLI that runs the install", got)
+	}
+	if err := os.WriteFile(path, []byte(strings.Replace(upgradeTestPlist, cli, own, 1)), 0o644); err != nil { // #nosec G306 -- launchd reads job files 0644
+		t.Fatal(err)
+	}
+	if got := proxyAgentBinary(path, own, cli); got != own {
+		t.Fatalf("a job already on its own copy: %q, want it kept there", got)
+	}
+	missing := filepath.Join(t.TempDir(), "none.plist")
+	if got := proxyAgentBinary(missing, own, cli); got != cli {
+		t.Fatalf("no job yet: %q, want the CLI", got)
+	}
+	_ = job
 }

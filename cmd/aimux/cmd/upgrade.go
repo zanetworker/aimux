@@ -27,7 +27,22 @@ type upgradeService struct{ id, name, label string }
 
 var upgradeServices = []upgradeService{
 	{"model-proxy", "model proxy", modelStatusLabel},
+	{"mcp-proxy", "mcp proxy", proxyAgentLabel},
 	{"collector", "collector", collectorStatusLabel},
+}
+
+// serviceProgram is a service's own copy of aimux, the file aimux upgrade maintains.
+func serviceProgram(home, id string) string {
+	return filepath.Join(home, ".aimux", "services", id, controller.ServiceProgram)
+}
+
+// proxyAgentBinary is the program the MCP proxy's job should run after an install run from cli: its own copy
+// when the job already runs it, so an install does not undo what aimux upgrade did; otherwise cli.
+func proxyAgentBinary(plistPath, own, cli string) string {
+	if mcpproxy.ReadPlistBinary(plistPath) == own {
+		return own
+	}
+	return cli
 }
 
 // notMoved are the services upgrade leaves alone for now, each with the command that updates it.
@@ -36,7 +51,6 @@ var notMoved = []struct {
 	Name   string `json:"name"`
 	Update string `json:"update"`
 }{
-	{"mcp-proxy", "mcp proxy", mcpStatusRestart},
 	{"tool-gateway", "tool gateway", "aimux mcp proxy gateway install"},
 }
 
@@ -50,7 +64,7 @@ func newUpgradeCmd() *cobra.Command {
 			"A service already on this build and already running from its own folder is left running; the first\n" +
 			"upgrade moves a service to its folder and restarts it whatever build it reports. Without names, every\n" +
 			"service upgrade handles is done:\n" +
-			"model-proxy and collector. Restarting the model proxy ends the turns in flight on it.\n" +
+			"model-proxy, mcp-proxy and collector. Restarting the model proxy ends the turns in flight on it.\n" +
 			"The exit code is 1 if a service was not upgraded.",
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {

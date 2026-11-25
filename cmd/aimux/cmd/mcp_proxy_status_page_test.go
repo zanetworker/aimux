@@ -106,7 +106,7 @@ jira    3m   timed out after 1m0s
 `
 
 var pageMessages = [][3]string{
-	{"WARNING", "upgrade restart pending (proxy v0.15.0, cli v0.16.0)", "aimux mcp proxy restart"},
+	{"WARNING", "upgrade restart pending (proxy v0.15.0, cli v0.16.0)", "aimux upgrade mcp-proxy"},
 	{"INFO", "9 servers behind the proxy", ""},
 	{"INFO", "hooks on", ""},
 	{"INFO", "removed from /home/x/.claude.json: minutes (still served, unused)", "aimux mcp proxy install"},
@@ -154,7 +154,7 @@ func TestStatusPage_NarrowCutsLines(t *testing.T) {
 		p.width = width
 		got := render(p)
 		for _, line := range strings.Split(got, "\n") {
-			if cmd := strings.TrimLeft(line, " "); strings.HasPrefix(cmd, "aimux mcp proxy ") && !strings.Contains(cmd, "…") {
+			if cmd := strings.TrimLeft(line, " "); strings.HasPrefix(cmd, "aimux ") && !strings.Contains(cmd, "…") {
 				continue
 			}
 			if n := runewidth.StringWidth(line); n > width {

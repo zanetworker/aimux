@@ -175,7 +175,7 @@ aimux mcp proxy install --unskip slack
 
 ### Reload and the restart trade-off
 
-The daemon reloads in place when you change a server (`edit`) or move a new one (re-run `install`). It does not restart, except when `install` runs from another aimux binary than the launchd job: then it points the job at this binary and restarts it first. The daemon restarts only when it crashes (launchd brings it back) or when the aimux binary itself is upgraded.
+The daemon reloads in place when you change a server (`edit`) or move a new one (re-run `install`). It does not restart, except when `install` runs from another aimux binary than the launchd job: then it points the job at this binary and restarts it first. A job that already runs the proxy's own copy (`~/.aimux/services/mcp-proxy/aimux`, where `aimux upgrade` puts it) is left on that copy. The daemon restarts only when it crashes (launchd brings it back) or when the aimux binary itself is upgraded.
 
 Open sessions survive a restart. In a live check, a Claude Code session made a tool call through the proxy, the daemon was restarted with `launchctl kickstart -k` (the same restart launchd does after a crash), and the next tool call from that session worked, with no session restart. The first call after a restart starts that server's backend again, so it can take a moment longer.
 
@@ -185,13 +185,19 @@ Open sessions survive a restart. In a live check, a Claude Code session made a t
 aimux mcp proxy status
 ```
 
-To restart the daemon after an upgrade:
+To bring the daemon to the build you installed:
+
+```bash
+aimux upgrade mcp-proxy
+```
+
+See [Upgrading the Background Services](/guides/upgrading-services/). To restart it on the build it already has:
 
 ```bash
 aimux mcp proxy restart
 ```
 
-It restarts the daemon in place (`launchctl kickstart -k`: the launchd job stays loaded, and its plist is not re-read), waits until the new daemon answers on the port the proxy was installed on, and prints its pid and version; a restart that fails or times out says so (and a note if the daemon runs another aimux binary than the one you ran, which `aimux mcp proxy install` from the new one fixes). You can do this at a convenient time; open sessions keep working.
+It restarts the daemon in place (`launchctl kickstart -k`: the launchd job stays loaded, and its plist is not re-read), waits until the new daemon answers on the port the proxy was installed on, and prints its pid and version; a restart that fails or times out says so (and a note if the daemon runs another aimux build than the one you ran, which `aimux upgrade mcp-proxy` fixes). You can do this at a convenient time; open sessions keep working.
 
 ### Tradeoffs
 
@@ -282,7 +288,7 @@ github  12m  exec: gh-mcp: not found
 jira    3m   timed out after 1m0s
 
 LEVEL    MESSAGE                                                      FIX
-WARNING  upgrade restart pending (proxy v0.15.0, cli v0.16.0)         aimux mcp proxy restart
+WARNING  upgrade restart pending (proxy v0.15.0, cli v0.16.0)         aimux upgrade mcp-proxy
 INFO     9 servers behind the proxy
 INFO     hooks on
 INFO     removed from ~/.claude.json: minutes (still served, unused)  aimux mcp proxy install

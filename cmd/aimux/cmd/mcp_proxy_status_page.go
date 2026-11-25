@@ -551,7 +551,7 @@ func installMessages(p statusPage) (warn, info []message) {
 	}
 	if st.UpgradePending && p.cliVersion != "" {
 		warn = append(warn, message{fmt.Sprintf("upgrade restart pending (proxy %s, cli %s)", cmp.Or(printable(st.DaemonVersion), "older"), p.cliVersion),
-			fixes("aimux mcp proxy restart")})
+			fixes("aimux upgrade mcp-proxy")})
 	}
 	if !st.Hooks {
 		warn = append(warn, message{"hooks off: servers you add later stay direct", fixes(installCmd(p))})

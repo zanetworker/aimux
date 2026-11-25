@@ -705,7 +705,7 @@ func TestInstall_HeaderedHTTPNeedsCurrentDaemon(t *testing.T) {
 	fx.setEntry("pp", json.RawMessage(`{"type": "http", "url": "https://pp.example/mcp", "headers": {"Authorization": "Bearer x-1"}}`))
 	before, _ := os.ReadFile(fx.claude) // #nosec G304 -- the test's temp config
 	err := fx.in.Install(nil)
-	if err == nil || !strings.Contains(err.Error(), "aimux mcp proxy restart") {
+	if err == nil || !strings.Contains(err.Error(), "aimux upgrade mcp-proxy") {
 		t.Fatalf("err = %v", err)
 	}
 	after, _ := os.ReadFile(fx.claude) // #nosec G304 -- the test's temp config
@@ -721,7 +721,7 @@ func TestInstall_StdioMoveWithSavedHTTPNeedsCurrentDaemon(t *testing.T) {
 	must(t, fx.in.Install(nil))
 	fx.in.Version, fx.daemonVersion = "1.2.0", "1.1.0"
 	fx.setEntry("pypi", json.RawMessage(`{"command": "pypi-mcp", "args": []}`))
-	if err := fx.in.Install(nil); err == nil || !strings.Contains(err.Error(), "aimux mcp proxy restart") {
+	if err := fx.in.Install(nil); err == nil || !strings.Contains(err.Error(), "aimux upgrade mcp-proxy") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -734,7 +734,7 @@ func TestEdit_SavedHTTPNeedsCurrentDaemon(t *testing.T) {
 	must(t, SaveServerFile(servers, map[string]ServerConfig{"st": {Command: "x"}, "dw": {Type: "http", URL: "https://x"}}, []string{"st", "dw"}))
 	status := func() (StatusReport, error) { return StatusReport{Running: true, Version: "1.1.0"}, nil }
 	err := EditServer(context.Background(), EditOptions{Server: "st", ManifestPath: manifest, ServersPath: servers, Status: status, Version: "1.2.0"})
-	if err == nil || !strings.Contains(err.Error(), "aimux mcp proxy restart") {
+	if err == nil || !strings.Contains(err.Error(), "aimux upgrade mcp-proxy") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -747,7 +747,7 @@ func TestInstall_RemovedServerWithOldDaemonChangesNothing(t *testing.T) {
 		return removeMember(old, "slack")
 	}))
 	before, _ := os.ReadFile(fx.servers) // #nosec G304 -- the test's temp file
-	if err := fx.in.Install(nil); err == nil || !strings.Contains(err.Error(), "aimux mcp proxy restart") {
+	if err := fx.in.Install(nil); err == nil || !strings.Contains(err.Error(), "aimux upgrade mcp-proxy") {
 		t.Fatalf("err = %v", err)
 	}
 	after, _ := os.ReadFile(fx.servers) // #nosec G304 -- the test's temp file

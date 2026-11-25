@@ -1079,7 +1079,7 @@ func (i Installer) UpgradeText(daemon string) string {
 	if daemon == "" {
 		daemon = "an older version"
 	}
-	return fmt.Sprintf("upgrade restart pending: the running proxy is aimux %s, this binary is %s; restart it when convenient with `aimux mcp proxy restart`",
+	return fmt.Sprintf("upgrade restart pending: the running proxy is aimux %s, this binary is %s; bring it to this build when convenient with `aimux upgrade mcp-proxy`",
 		daemon, i.Version)
 }
 

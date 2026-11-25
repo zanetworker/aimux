@@ -109,7 +109,7 @@ Use the Claude Code or Codex built-in history instead if you run one agent at a 
 | Define servers and their secrets | `aimux servers discover <name> --cwd <dir>` (the variables a server reads, with a suggested reference each), `aimux servers migrate` (split `tool-sources.yaml` into `servers.yaml` and `tool-sets.yaml`) |
 | Set up everything missing, then check it | `aimux setup` (runs only missing steps), `aimux doctor` (read-only, one fix per problem) |
 | Check the background services | `aimux status` (model proxy, MCP proxy, tool gateway, collector; one fix per problem; exit 1 when one needs attention) |
-| Bring the model proxy and the collector to this build | `aimux upgrade` (the MCP proxy and the tool gateway are not moved yet and are listed with their own command; copies this build into each service's own folder, restarts it, and puts the previous build back if it does not answer; `--dry-run` to see the plan) |
+| Bring the model proxy, the MCP proxy and the collector to this build | `aimux upgrade` (the tool gateway is not moved yet and is listed with its own command; copies this build into each service's own folder, restarts it, and puts the previous build back if it does not answer; `--dry-run` to see the plan) |
 | See what a profile allows | `aimux profile list`, `aimux profile show work-readonly`, `aimux profile check <name>` |
 
 <details>

@@ -29,7 +29,7 @@ func newMCPProxyHooksCmd() *cobra.Command {
 			}
 			in := proxyInstaller(home, restartPort(home, 7381, false), io.Discard)
 			if bin, err := stableBinary("aimux mcp proxy install"); err == nil {
-				in.Agent.Binary, in.HookBinary = bin, bin
+				in.Agent.Binary, in.HookBinary = proxyAgentBinary(in.Agent.PlistPath, serviceProgram(home, "mcp-proxy"), bin), bin
 			}
 			_ = answerProxyHook(args[0], cmd.InOrStdin(), cmd.OutOrStdout(), in)
 			return nil

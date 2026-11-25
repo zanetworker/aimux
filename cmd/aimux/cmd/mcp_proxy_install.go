@@ -219,7 +219,7 @@ func newMCPProxyInstallCmd() *cobra.Command {
 			"Tool names stay the same, so permission rules keep working unchanged. In ~/.claude/settings.json it sets " +
 			"CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT and adds two hooks: one moves a server you add in a Claude Code session behind the proxy, " +
 			"one names servers still direct when a session starts (uninstall removes both). " +
-			"When the launchd agent runs another aimux binary than this one, install first points the plist's program at this binary and restarts the agent (also when there is nothing new to move). " +
+			"When the launchd agent runs another aimux binary than this one, install first points the plist's program at this binary and restarts the agent (also when there is nothing new to move), unless the agent already runs the proxy's own copy under ~/.aimux/services, which only `aimux upgrade mcp-proxy` changes. " +
 			"Run it again to move servers added later, and to take off the proxy any moved server you removed from ~/.claude.json (claude mcp remove); servers kept direct with --skip stay direct until --unskip. Moved stdio servers are configured with `aimux mcp proxy edit` (moved HTTP servers by uninstall, edit, install), not in " +
 			"~/.claude.json. What changed is recorded in ~/.aimux/mcp-proxy-install.json; `uninstall` undoes it.",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -251,6 +251,7 @@ func newMCPProxyInstallCmd() *cobra.Command {
 				return err
 			}
 			in.HookBinary = in.Agent.Binary
+			in.Agent.Binary = proxyAgentBinary(in.Agent.PlistPath, serviceProgram(home, "mcp-proxy"), in.Agent.Binary)
 			err = in.Install(skip)
 			if interrupted.Load() {
 				return fmt.Errorf("%w: %v", errInstallInterrupted, err)
@@ -334,7 +335,7 @@ func runProxyRestart(in mcpproxy.Installer, out io.Writer) error {
 	}
 	_, _ = fmt.Fprintf(out, "Restarted the MCP proxy: pid %d, aimux %s. Open sessions keep working; each server starts again on its next call.\n", rep.PID, rep.Version)
 	if in.Version != "" && rep.Version != "" && rep.Version != in.Version {
-		_, _ = fmt.Fprintf(out, "Note: the daemon runs aimux %s but this binary is %s: the launchd agent starts another aimux binary; run `aimux mcp proxy install` from this one to switch.\n", rep.Version, in.Version)
+		_, _ = fmt.Fprintf(out, "Note: the daemon runs aimux %s but this binary is %s: the launchd agent starts another aimux binary; run `aimux upgrade mcp-proxy` to bring it to this build.\n", rep.Version, in.Version)
 	}
 	return nil
 }
