@@ -483,3 +483,13 @@ func TestAnthropicEngine_NeverSendsElsewhere(t *testing.T) {
 		}
 	}
 }
+
+func TestUnescapeWhatItCan(t *testing.T) {
+	for in, want := range map[string]string{
+		"plain": "plain", "a%2Fb": "a/b", "%6b%6B": "kk", "bad%ZZ%41": "bad%ZZA", "end%4": "end%4", "end%": "end%", "%41": "A", "": "",
+	} {
+		if got := unescapeWhatItCan(in); got != want {
+			t.Errorf("unescapeWhatItCan(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

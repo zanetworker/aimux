@@ -230,11 +230,40 @@ func (e *anthropicEngine) holdsProxyKey(part string) bool {
 	if e.proxyKey == "" {
 		return false
 	}
-	if strings.Contains(part, e.proxyKey) {
-		return true
+	return strings.Contains(part, e.proxyKey) || strings.Contains(unescapeWhatItCan(part), e.proxyKey)
+}
+
+// unescapeWhatItCan decodes every well-formed percent escape and leaves the rest as written. A strict decoder
+// gives up on the whole string at the first bad escape, which would hide a key written with good ones beside it.
+func unescapeWhatItCan(s string) string {
+	if !strings.Contains(s, "%") {
+		return s
 	}
-	plain, err := url.QueryUnescape(part)
-	return err == nil && strings.Contains(plain, e.proxyKey)
+	var plain strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '%' && i+2 < len(s) && isHex(s[i+1]) && isHex(s[i+2]) {
+			plain.WriteByte(unhex(s[i+1])<<4 | unhex(s[i+2]))
+			i += 2
+			continue
+		}
+		plain.WriteByte(s[i])
+	}
+	return plain.String()
+}
+
+func isHex(c byte) bool {
+	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+}
+
+func unhex(c byte) byte {
+	switch {
+	case c >= 'a':
+		return c - 'a' + 10
+	case c >= 'A':
+		return c - 'A' + 10
+	default:
+		return c - '0'
+	}
 }
 
 var hopByHopHeaders = map[string]bool{

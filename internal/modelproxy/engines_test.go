@@ -3,6 +3,7 @@ package modelproxy
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -388,6 +389,7 @@ func TestHandler_TheKeyNeverReachesAnthropicInAPath(t *testing.T) {
 		"/k%2F" + testKey + "/v1/messages",
 		"/v1/files/" + testKey,
 		"/v1/files?after=" + testKey,
+		"/v1/files?copy=%" + fmt.Sprintf("%02X", testKey[0]) + testKey[1:] + "&bad=%ZZ",
 	} {
 		res := p.send(t, target, "claude-sonnet-5-5", "", "hello", map[string]string{"Authorization": callersLogin})
 		if res.Code < 400 || strings.Contains(res.Body.String(), testKey) {
