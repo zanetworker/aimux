@@ -188,16 +188,10 @@ func startStdioIn(ctx context.Context, server string, cfg ServerConfig, expand b
 		return nil, b.failure(fmt.Errorf("start MCP server %s (%s): %w", server, cfg.Command, err))
 	}
 	b.c = c
-	// The constructor starts only the transport; Start installs the client's
-	// notification dispatch (progress) and its answers to the server's own
-	// requests (ping; others get an error instead of no answer at all).
-	if err := c.Start(ctx); err != nil {
-		_ = c.Close()
-		return nil, b.failure(fmt.Errorf("start MCP server %s (%s): %w", server, cfg.Command, err))
-	}
-	c.OnNotification(b.progress.deliver)
 	// Read the server's stderr: the client opens the pipe but never reads it,
 	// and a server that logs more than the pipe holds would block and hang.
+	// Reading begins before Start, because the process already runs: a server
+	// that exits at once fails Start itself, and its stderr says why.
 	drained := make(chan struct{})
 	if stderr, ok := client.GetStderr(c); ok {
 		go func() {
@@ -207,6 +201,28 @@ func startStdioIn(ctx context.Context, server string, cfg ServerConfig, expand b
 	} else {
 		close(drained)
 	}
+	// awaitStderr lets a failed server's last lines arrive before Close,
+	// which closes the pipe's read end and loses what is still in it; not
+	// when the start already timed out.
+	awaitStderr := func() {
+		if ctx.Err() != nil {
+			return
+		}
+		select {
+		case <-drained:
+		case <-ctx.Done():
+		case <-time.After(stderrDrainWait):
+		}
+	}
+	// The constructor starts only the transport; Start installs the client's
+	// notification dispatch (progress) and its answers to the server's own
+	// requests (ping; others get an error instead of no answer at all).
+	if err := c.Start(ctx); err != nil {
+		awaitStderr()
+		_ = c.Close()
+		return nil, b.failure(fmt.Errorf("start MCP server %s (%s): %w", server, cfg.Command, err))
+	}
+	c.OnNotification(b.progress.deliver)
 	if b.PID() != 0 {
 		b.done = make(chan struct{})
 		go b.awaitExit(drained)
@@ -221,15 +237,8 @@ func startStdioIn(ctx context.Context, server string, cfg ServerConfig, expand b
 		b.noTools = res.Capabilities.Tools == nil
 	}
 	if err != nil {
-		// The server's last stderr lines usually say why. Close closes the
-		// pipe's read end, losing what is still in it, so let stderr end on
-		// its own first (briefly); not when the start already timed out.
-		if ctx.Err() == nil {
-			select {
-			case <-drained:
-			case <-time.After(stderrDrainWait):
-			}
-		}
+		// The server's last stderr lines usually say why.
+		awaitStderr()
 		_ = b.Close()
 		return nil, b.failure(fmt.Errorf("initialize MCP server %s: %w", server, err))
 	}

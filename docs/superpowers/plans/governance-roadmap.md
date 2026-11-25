@@ -78,8 +78,8 @@ A stage is done when its "done when" line is true on the owner's machine, not wh
 | Promote survives a cold start | The first request after a restart can time out, and a good build is then rejected | 0 | Built and tested in `aimux-worktrees/promote-cold-start`; waits for the owner's word to commit |
 | `aimux upgrade`: services run from their own copy | Three launchd jobs start `~/go/bin/aimux`, which any install overwrites | 0 | Built and tested in `aimux-worktrees/aimux-upgrade` for the model proxy and the collector; waits for the owner's word to commit |
 | The MCP proxy runs from its own copy | `aimux mcp proxy install` points its job at the binary that ran it and would move it back | 0 | Not started |
-| Flaky test `TestProxyStatus_NeverPrintsEnvValues` | Failed CI once on an unrelated change | 0 | Not started |
-| Flaky test `TestClaude_SharesOneLiveCache` | Failed once in the full suite; it depends on a one-second cache surviving a loaded machine | 0 | Not started |
+| Flaky test `TestProxyStatus_NeverPrintsEnvValues` | A real fault, not a test fault: an MCP server that exits so fast that the start itself fails lost its stderr, so its error did not say why. Reproduced under Linux (3 of 3 runs) and fixed in `internal/mcpproxy/stdio.go` | 0 | Done, in the same change as this line |
+| Flaky test `TestClaude_SharesOneLiveCache` | Failed once in the full suite; it depended on a one-second cache surviving a loaded machine. An attempt that outlasts the window is now repeated | 0 | Done, in the same change as this line |
 | Requested and served model in the request history | Only the first is recorded | 1 | Folded into slice 1 |
 | The tool gateway reports its build | Its build column in `aimux status` is empty | Any | Not started |
 | The tool gateway runs from its own copy | It runs a hand-kept copy under `~/.aimux/wingman/bin/` | 2 | With the Wingman session |

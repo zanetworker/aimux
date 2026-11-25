@@ -722,3 +722,22 @@ func TestStdioBackend_ResolvedByInstallIsNotExpandedAgain(t *testing.T) {
 		t.Fatalf("server saw AIMUX_PROBE=%q, want the resolved value unchanged", got)
 	}
 }
+
+// A server can exit so quickly that the start fails before the handshake is even sent. Its stderr still says why,
+// and must be in the tail on that path too. A shell that prints and exits is the fastest server there is; the
+// loop gives the race room to happen (it did in CI, about once in several hundred starts).
+func TestStdioStarter_ServerThatExitsAtOnceKeepsStderrTail(t *testing.T) {
+	cfgs := map[string]ServerConfig{"quick": {Command: "sh", Args: []string{"-c", `echo "why it failed" >&2; exit 1`}}}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	for i := range 300 {
+		b, err := StdioStarter(cfgs)(ctx, "quick")
+		if err == nil {
+			_ = b.Close()
+			t.Fatal("a server that exits at once started")
+		}
+		if tail := stderrTailOf(err); len(tail) != 1 || tail[0] != "why it failed" {
+			t.Fatalf("start %d: stderr tail %q, want the line the server wrote (err: %v)", i, tail, err)
+		}
+	}
+}

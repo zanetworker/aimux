@@ -123,33 +123,46 @@ func TestTranscriptsDir_NoHomeFallsBackToRelative(t *testing.T) {
 // TUI or dashboard refresh (discover, then the state service's holders)
 // reads the registry and runs ps once.
 func TestClaude_SharesOneLiveCache(t *testing.T) {
-	dir := t.TempDir()
 	me := os.Getpid()
 	entry := fmt.Sprintf(`{"pid":%d,"sessionId":"shared-1","cwd":"/w","status":"busy"}`, me)
-	if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("%d.json", me)), []byte(entry), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	c := &Claude{RegistryDir: dir, ProjectsDir: t.TempDir()}
-	if c.LiveSessions(discovery.LiveTTL) != c.LiveSessions(discovery.LiveTTL) {
-		t.Fatal("LiveSessions built a second reader for the same ttl")
-	}
-	if c.LiveSessions(0) == c.LiveSessions(discovery.LiveTTL) {
-		t.Fatal("another ttl shares the reader")
-	}
-	agents, err := c.discoverFromAgents([]agent.Agent{{PID: me}}, nil, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(agents) == 0 || agents[0].SessionID != "shared-1" {
-		t.Fatalf("discovery did not read RegistryDir: %+v", agents)
-	}
-	// The registry is gone, but within the TTL the holders come from the
-	// read discovery made.
-	if err := os.RemoveAll(dir); err != nil {
-		t.Fatal(err)
-	}
-	hs, _ := c.LiveSessions(discovery.LiveTTL).Holders(harness.List)
-	if len(hs) != 1 || hs[0].SessionID != "shared-1" || hs[0].Status != "busy" {
-		t.Fatalf("holders after discovery = %+v, want the read discovery made", hs)
+	// The last step only means something inside the cache's TTL, which is wall-clock time. On a loaded machine
+	// the steps before it can outlast the TTL, so an attempt that took too long is repeated, not failed.
+	for attempt := 1; ; attempt++ {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("%d.json", me)), []byte(entry), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		c := &Claude{RegistryDir: dir, ProjectsDir: t.TempDir()}
+		if c.LiveSessions(discovery.LiveTTL) != c.LiveSessions(discovery.LiveTTL) {
+			t.Fatal("LiveSessions built a second reader for the same ttl")
+		}
+		if c.LiveSessions(0) == c.LiveSessions(discovery.LiveTTL) {
+			t.Fatal("another ttl shares the reader")
+		}
+		began := time.Now()
+		agents, err := c.discoverFromAgents([]agent.Agent{{PID: me}}, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(agents) == 0 || agents[0].SessionID != "shared-1" {
+			t.Fatalf("discovery did not read RegistryDir: %+v", agents)
+		}
+		// The registry is gone, but within the TTL the holders come from the
+		// read discovery made.
+		if err := os.RemoveAll(dir); err != nil {
+			t.Fatal(err)
+		}
+		hs, _ := c.LiveSessions(discovery.LiveTTL).Holders(harness.List)
+		took := time.Since(began)
+		if len(hs) == 1 && hs[0].SessionID == "shared-1" && hs[0].Status == "busy" {
+			return
+		}
+		// A wrong answer counts only when the attempt was quick enough to be inside the window.
+		if took < discovery.LiveTTL/2 {
+			t.Fatalf("holders after discovery = %+v, want the read discovery made", hs)
+		}
+		if attempt == 5 {
+			t.Fatalf("five attempts each took longer than half the TTL (last: %v); the machine is too loaded to check this", took)
+		}
 	}
 }
