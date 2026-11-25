@@ -33,6 +33,10 @@ type anthropicEngine struct {
 	upstream *url.URL
 	client   *http.Client // no overall timeout: a turn can stream for minutes; the client's context ends it
 	proxyKey string       // removed from a request wherever the caller put it; the upstream never sees it
+	// refusalNote, when set, is what the client is told instead of the upstream's own answer when the upstream
+	// refuses the credential (401 or 403). It is set where the credential is the proxy's and not the caller's:
+	// such an answer may repeat the key it was sent.
+	refusalNote string
 }
 
 // forwardResult is what the engine saw. It holds no credential and no text of the request or the answer.
@@ -42,6 +46,9 @@ type forwardResult struct {
 	Usage      Usage
 	UsageKnown bool // false when the response carried no usage, or none that could be read
 	Outcome    string
+	// KeyRefused: the upstream refused a credential that was the proxy's own, and the client was told so in the
+	// proxy's words.
+	KeyRefused bool
 }
 
 // newAnthropicEngine checks upstream is a bare origin (scheme and host, nothing else), so a path, a query or a
@@ -100,6 +107,29 @@ func (e *anthropicEngine) forward(w http.ResponseWriter, r *http.Request, reques
 		return forwardResult{Status: http.StatusBadGateway, Outcome: forwardUnreachable}
 	}
 	defer func() { _ = resp.Body.Close() }()
+	// Where the credential sent is the proxy's own, the answer is the upstream's word to the proxy, and not all
+	// of it is the caller's to read.
+	own := ""
+	if e.refusalNote != "" {
+		own = out.Header.Get("X-Api-Key")
+		switch {
+		case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+			writeError(w, http.StatusBadGateway, "api_error", e.refusalNote)
+			return forwardResult{Status: http.StatusBadGateway, Outcome: forwardUpstreamErr, KeyRefused: true}
+		case resp.StatusCode >= 300 && resp.StatusCode < 400:
+			// A client that followed it would take the conversation to an address nobody configured.
+			writeError(w, http.StatusBadGateway, "api_error", "the upstream answered with a redirect, which is not followed or passed on")
+			return forwardResult{Status: http.StatusBadGateway, Outcome: forwardUpstreamErr}
+		case resp.StatusCode >= 400:
+			// An error may repeat the credential it was about. It is small: read whole and looked at first.
+			text, err := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody+1))
+			if err != nil || len(text) > maxErrorBody || holds(string(text), own) {
+				writeError(w, http.StatusBadGateway, "api_error", fmt.Sprintf("the upstream answered %d with an error that could not be passed on", resp.StatusCode))
+				return forwardResult{Status: http.StatusBadGateway, Outcome: forwardUpstreamErr}
+			}
+			resp.Body = io.NopCloser(bytes.NewReader(text))
+		}
+	}
 
 	result := forwardResult{Status: resp.StatusCode, Outcome: forwardOK}
 	succeeded := resp.StatusCode >= 200 && resp.StatusCode < 300
@@ -115,9 +145,12 @@ func (e *anthropicEngine) forward(w http.ResponseWriter, r *http.Request, reques
 	}
 	header := w.Header()
 	for name, values := range resp.Header {
-		if !hopByHop(name, resp.Header) {
+		if !hopByHop(name, resp.Header) && !holds(strings.Join(values, "\n"), own) {
 			header[name] = values
 		}
+	}
+	if own != "" && !succeeded {
+		header.Del("Content-Length") // the body was read and is written again
 	}
 	if usage.judges() {
 		// With a promised length the client would take an answer found unfinished for a whole one: it gets
@@ -266,13 +299,16 @@ func upstreamPath(requestPath string) string {
 
 const keyInAddress = "the request's address holds the proxy key, which is not sent on"
 
+// maxErrorBody bounds an upstream's error answer that is read whole before any of it is passed on.
+const maxErrorBody = 1 << 20
+
 // holdsProxyKey reports whether part of an address, or a header value, holds the proxy key, as written or behind
 // percent escapes.
-func (e *anthropicEngine) holdsProxyKey(part string) bool {
-	if e.proxyKey == "" {
-		return false
-	}
-	return strings.Contains(part, e.proxyKey) || strings.Contains(unescapeWhatItCan(part), e.proxyKey)
+func (e *anthropicEngine) holdsProxyKey(part string) bool { return holds(part, e.proxyKey) }
+
+// holds reports whether text holds secret, as written or behind percent escapes. An empty secret is held nowhere.
+func holds(text, secret string) bool {
+	return secret != "" && (strings.Contains(text, secret) || strings.Contains(unescapeWhatItCan(text), secret))
 }
 
 // unescapeWhatItCan decodes every well-formed percent escape and leaves the rest as written. A strict decoder

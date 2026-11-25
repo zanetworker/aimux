@@ -197,22 +197,29 @@ func serveEngines(w http.ResponseWriter, r *http.Request, carried credentials, p
 	}
 }
 
-// serveAnthropicMessage forwards one model call to Anthropic and records it as the Codex path records its own: a
-// ledger line and a request-history record, with figures and ids and no text.
+// serveAnthropicMessage forwards one model call to Anthropic and records it.
 func serveAnthropicMessage(w http.ResponseWriter, r *http.Request, path string, body []byte, config *handlerConfig) {
-	timing := &messageTiming{ResponseWriter: w, started: time.Now(), firstByte: -time.Millisecond}
 	// Read for the session, the turn and the model's name only. A body this does not fit is still forwarded.
 	var request messageRequest
 	_ = json.Unmarshal(body, &request)
+	serveForwardedMessage(w, r, r, path, body, request, engineAnthropic, config.anthropic, config)
+}
+
+// serveForwardedMessage forwards one model call to engine and records it as the Codex path records its own: a
+// ledger line and a request-history record, with figures and ids and no text. r is the request as it came, read
+// for whose call this is; out is the request the engine sends on, which may be r itself; request is what body
+// held before anything was changed for the upstream.
+func serveForwardedMessage(w http.ResponseWriter, r, out *http.Request, path string, body []byte, request messageRequest, name string, engine *anthropicEngine, config *handlerConfig) forwardResult {
+	timing := &messageTiming{ResponseWriter: w, started: time.Now(), firstByte: -time.Millisecond}
 	var call *ledger.Line
 	if config.ledger != nil {
 		var change *ledger.Line
-		call, change = startModelCall(config.turns, r, request, engineAnthropic, "", request.OutputConfig.Effort)
+		call, change = startModelCall(config.turns, r, request, name, "", request.OutputConfig.Effort)
 		if change != nil {
 			config.ledger.Write(*change)
 		}
 	}
-	result := config.anthropic.forward(timing, r, path, body)
+	result := engine.forward(timing, out, path, body)
 	failure := ""
 	if result.Outcome != forwardOK {
 		failure = result.Outcome
@@ -222,7 +229,7 @@ func serveAnthropicMessage(w http.ResponseWriter, r *http.Request, path string, 
 		session = SessionTag(id)
 	}
 	config.requests.Record(Record{
-		At: timing.started, Outcome: "forwarded", Detail: engineAnthropic, Session: session, Model: ledgerModel(request.Model),
+		At: timing.started, Outcome: "forwarded", Detail: name, Session: session, Model: ledgerModel(request.Model),
 		Effort: ledgerID(request.OutputConfig.Effort), Status: timing.status, TTFB: timing.firstByte,
 		Duration: time.Since(timing.started), Usage: result.Usage, Error: failure,
 	})
@@ -231,4 +238,5 @@ func serveAnthropicMessage(w http.ResponseWriter, r *http.Request, path string, 
 		call.ResponseModel, call.UsageUnknown = ledgerModel(result.Model), !result.UsageKnown
 		config.ledger.Write(*call)
 	}
+	return result
 }

@@ -64,6 +64,7 @@ With it on, the proxy decides who answers from two things a request carries, nev
 |---|---|---|
 | a `codex:` model | the proxy key | Codex |
 | a `codex:` model | no proxy key | nobody: 401, with the command that starts a session with the key |
+| a `<name>:` model of a named upstream (below) | the proxy key | that upstream; this row is checked first |
 | any other model | the caller's own Claude login | Anthropic |
 | any other model | the proxy key and no login | Codex, as before: the default Codex model answers |
 
@@ -102,6 +103,24 @@ A session can change engine from one request to the next, by naming another mode
 An Anthropic call writes a ledger line like a Codex call, with `aimux.engine` set to `anthropic`, the model Anthropic said answered, and the token counts from its answer. When an answer carries no token counts, an error for example, the line says so, and `aimux cost` reports how many such calls there were instead of counting them as zero.
 
 The request history records an Anthropic call with the outcome `forwarded`. `aimux model proxy stats` was written for Codex conversations and lists every outcome it does not know under fallbacks, so forwarded calls appear there for now. Appearing there says nothing went wrong and nothing was sent twice; a forwarded call that did fail is counted as a failure like any other.
+
+## A named upstream: another address that speaks the Messages API
+
+```bash
+aimux model proxy serve --messages-upstream enmaas=https://gateway.example
+claude --model enmaas:claude-opus-5-5      # from a shell pointed at the proxy
+```
+
+`--messages-upstream name=address` adds an engine of that name; the flag can be given more than once, and it does not need `--anthropic`. A request that names a model as `<name>:<model>` and carries the proxy key is sent to that address:
+
+- The model's name loses its prefix, and nothing else in the request body changes.
+- The key for the upstream is read from the secret-store entry `<name>-key` (on macOS, a Keychain item with that service name) and sent as `x-api-key`. The proxy keeps it for a minute at most, reads it again when the upstream refuses it, and writes it nowhere.
+- None of the caller's credentials go there: not the Claude login, not the proxy key, no cookie. Only the headers that say how to read the request and the answer are sent.
+- The proxy key is required, as for Codex: the upstream is paid for with the owner's key. A Claude login alone does not open it, with or without `--anthropic`.
+
+An address on another machine has to be `https`. A session reaches a named upstream from a shell pointed at the proxy with `aimux model proxy env`, which needs `--anthropic`; a proxy started without it is used as for Codex alone, with the proxy's address as the base URL and the proxy key as the API key.
+
+A missing key entry is a 502 that names the entry, and nothing is sent. When the upstream refuses the key, the caller gets a 502 that names the entry too, in the proxy's words: the upstream's own answer is not passed on, since it may repeat the key. For the same reason any other error from the upstream is read before it is passed on, and replaced when it holds the key; and a redirect from the upstream is answered with a 502, so no session is sent to an address nobody configured. The same name cannot be given twice. A prefix that is neither `codex` nor a configured name is a 400 that lists the names there are. The ledger line has the upstream's name as `aimux.engine`, the model as the client named it, and the model the upstream said answered. `/healthz` lists the name among `engines`.
 
 ## Speed
 

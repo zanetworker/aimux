@@ -24,7 +24,7 @@ func newModelProxyEnvCmd() *cobra.Command {
 		Short: "Print the shell lines that send this shell's Claude Code sessions through the model proxy",
 		Long: "Prints lines for eval. After\n\n  eval \"$(aimux model proxy env)\"\n\n" +
 			"Claude Code sessions started from that shell go through the model proxy: a Claude model is answered by " +
-			"Anthropic on your own Claude login, and a codex: model by Codex. It sets ANTHROPIC_BASE_URL, with the " +
+			"Anthropic on your own Claude login, a codex: model by Codex, and a <name>: model by that named upstream when the proxy has one. It sets ANTHROPIC_BASE_URL, with the " +
 			"proxy key in it, and unsets ANTHROPIC_API_KEY and ANTHROPIC_AUTH_TOKEN so the login is used. It says " +
 			"nothing about which model a session uses. It needs a running proxy that was started with --anthropic.\n\n" +
 			"The output holds the proxy key: it is refused when it would be shown on a terminal, and a shell with " +
