@@ -25,7 +25,10 @@ type Usage struct {
 	InputTokens          int `json:"input_tokens"`
 	OutputTokens         int `json:"output_tokens"`
 	CacheReadInputTokens int `json:"cache_read_input_tokens"`
-	estimated            bool
+	// CacheCreationInputTokens is input written to the prompt cache. Anthropic reports it; Codex does not, so a
+	// Codex answer leaves it out.
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+	estimated                bool
 }
 
 type Event struct {
