@@ -1,7 +1,8 @@
 // Package parts is the one list of what aimux is made of: the parts an owner turns on, and the background
 // services each needs. status, upgrade and setup read it, where each kept a list of its own.
 //
-// It imports nothing from the repository, so anything may read it.
+// It imports only internal/secretref from the repository, for the form a key reference takes, so anything may
+// read it.
 package parts
 
 import "slices"
