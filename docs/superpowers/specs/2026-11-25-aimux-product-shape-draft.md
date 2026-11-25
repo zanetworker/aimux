@@ -381,8 +381,9 @@ To the user the MCP proxy and the tool gateway are one part, the MCP proxy, with
 
 - **One release version** for the CLI and every service. `aimux version` prints one line.
 - **Each contract has its own small version**: the ledger line, the health answer, the sessions API, each file two
-  processes share. A reader accepts older versions; a writer that meets a newer one refuses to write. This is what
-  keeps the minutes of a mixed upgrade safe.
+  processes share. A reader accepts older versions. A reader that meets a newer one than it knows does not guess: it skips
+  those records, says how many it skipped, and marks any total that spans them as incomplete. A writer that meets
+  a newer one refuses to write. Together these keep the minutes of a mixed upgrade safe.
 - **Separate products later, by evidence.** A piece is split out when someone wants it without the rest, or it
   needs a different stability promise. Because pieces talk only through the contracts, a separate binary from the
   same repository is a packaging change.
@@ -424,8 +425,11 @@ Rules:
 - **The file holds what the owner wants, never what aimux found or wrote.** Install manifests, backups, pins and
   paired devices stay where they are, outside it.
 - **No secret is ever in it.** A key is a reference to the Keychain, as `servers.yaml` already does.
-- **It is portable.** The same file on a new machine, then `aimux setup --apply`, gives the same setup. On a
-  cluster it is the configuration the container reads.
+- **It is portable, with the two files it points at.** `config.yaml`, `servers.yaml` and `tool-sets.yaml` on a
+  new machine, then `aimux setup --apply`, give the same setup. Secrets do not travel: each key is entered into
+  that machine's Keychain. Tool approvals do not travel either: pins are made again there with
+  `aimux tools approve`, because a pin vouches for what that machine's servers serve. On a cluster the three files
+  are the configuration the container reads.
 - **A project's own `.aimux/config.yaml` can narrow, never widen.** It may restrict tool sets, and choose among
   the engines the owner has already approved for that kind of content. It cannot turn on a part, and it cannot
   send a conversation to a provider that project has not been sent to before: the owner is asked the first time,
@@ -480,7 +484,9 @@ When it can resume, against the stages above:
 
 ## The clean base
 
-Five things, each small, each taken from code that already works. None of them blocks the roadmap.
+Five things, each small, each taken from code that already works. Four of them block nothing. The fifth, the
+shared session reader (B5), is needed before evals can detect corrections, so it is built in stage 4, ahead of
+that eval work.
 
 | Base | What it is | Why it comes first |
 |---|---|---|
@@ -559,7 +565,7 @@ covered" means every Claude Code session; native Codex stays covered by totals o
 | Terminal UI | Sessions, preview, trace from transcripts, its own cost view | A services line in the header; trace view also reads ledger lines | A model column, a cost column, "not covered" marks; cost view reads the meter | A schedules view; model and backend choice in the launcher |
 | Dashboard | Sessions, history, costs, insights | A services strip | Cost by model and by who started the session | A setup page with the switches for each part; a schedules page |
 | Phone (web and iPhone) | Now, All, chat, queue, alerts | Unchanged | Model and cost on a session | Scheduled sessions and their alerts; agent and model choice for a new session |
-| Wingman (browser panel, its runs) | Its own build of the tool gateway; stages in sandboxes with no telemetry; its own router | Its tool calls are ledger lines with the run id, so a question has a cost in tools | Its model calls pass the sandbox entrance, so a question has a full cost; the gateway runs the one build | Its stages are sessions created the same way as any other; its route function becomes "auto"'s second step |
+| Wingman (browser panel, its runs) | Its own build of the tool gateway; stages in sandboxes with no telemetry; its own router | Its model calls pass the sandbox entrance (stage 3), so a question has a cost in model calls | Its tool calls are ledger lines with the run id (stage 5), so a question has a full cost; the gateway runs the one build | Its stages are sessions created the same way as any other; its route function becomes "auto"'s second step |
 | aimux's own MCP server (session search for agents) | Lists and reads sessions | Unchanged | Can answer what a session cost | Can list schedules |
 | Status line (the HUD) | Reads a Codex usage file the proxy writes | Unchanged | Reads the meter instead | Unchanged |
 

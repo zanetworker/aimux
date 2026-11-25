@@ -47,12 +47,12 @@ A stage is done when its "done when" line is true on the owner's machine, not wh
 
 | Stage | Delivers | Done when | Roadmap items | State |
 |---|---|---|---|---|
-| 0. Land what is waiting | Promote survives a cold start; `aimux upgrade`; the MCP proxy on its own copy; the two flaky tests | `aimux status` shows no service running `~/go/bin/aimux`, and a `go install` changes no service | Small work below | In progress |
+| 0. Land what is waiting | Promote survives a cold start; `aimux upgrade`; the MCP proxy on its own copy; the two flaky tests | A promote has passed with the retry in place; `aimux upgrade` has moved the live model proxy, collector and MCP proxy, so `aimux status` shows no service running `~/go/bin/aimux` and a `go install` changes none; a broken build has been rolled back once on purpose; both flaky tests pass 20 runs in a row | Small work below | In progress |
 | 1. One record | Ledger files written by the model proxy; a reader; a first meter | `aimux cost` shows requests and tokens per session and model for a day of real use, and its totals match `aimux model proxy stats` | Slice 1 | Next. No plan yet |
 | 2. One way in, and identity | The entry wrapper behind `claude-codex`; the registry of parts; the parts menu in `aimux setup`; `enable`, `disable`; job files generated from the registry | A background call carries its session in the ledger; the model proxy's job file is one aimux wrote | Slice 2, base items B1 and B3 | Not started |
 | 3. A second engine, by choice | Anthropic passthrough and a sandbox entrance; switching model by hand in a session | A Claude session routed through the proxy runs a streamed tool call on Anthropic, then continues on Codex | Slice 8a | Not started. Waits on the sandbox half of 0a |
 | 4. The right model per task | Roles mapped to engines; fallback on a limit error | A helper runs on another engine than its main conversation without being told to, and the ledger shows both | Slices 8b, 8c | Not started |
-| 4, in parallel. Evals resume | In the eval session: contracts, detection in shadow, migration, the review queue | A correction made in a Codex session appears in the review queue | Eval phases 0 to 3; base item B5 | Paused by the owner; resumes after stage 1 |
+| 4, in parallel. Evals resume | In the eval session: contracts, detection in shadow, migration, the review queue | A correction made in a Codex session appears in the review queue | Eval phases 0 to 3; base item B5, built in this stage | Paused by the owner. Resumes after stage 1 only on his word |
 | 5. See everything | Hooks report tool calls; the MCP proxy and tool gateway write lines; changed tools flagged on the host | One session's timeline shows its model calls, built-in tools and MCP tools, each with its source | Slices 3, 4 | Not started |
 | 6. Numbers, and "auto" | Full meter; spans; rules; the model catalog fed by eval cases; "auto" | Cost with measured, estimated or unpriced on every surface; "auto" names the evidence for a choice | Slices 5, 6, 7, 8d to 8f; eval phases 4 to 6 | Not started |
 | 7. Every session covered | The inference proxy in front of all Claude Code sessions | Plain `claude` is recorded, after the checklist in the product-shape draft has passed on the dev channel | New | Not started |
@@ -130,7 +130,7 @@ Base items from the product-shape draft: B1 the registry of parts, B2 the servic
 
 | Item | Where it lives | Resumes when |
 |---|---|---|
-| Evals | The eval session's design, research wiki, `wiki/agentic-evals/my-eval-loop/aimux-eval-engine-design.md` | Stage 1 is done; the two documents are then reconciled |
+| Evals | The eval session's design, research wiki, `wiki/agentic-evals/my-eval-loop/aimux-eval-engine-design.md` | Stage 1 is done and the owner says so; the two documents are then reconciled |
 | Policy from sessions | A profiler and a draft sandbox policy; a safety copy in the research repo under `raw/session-to-policy-scratch/` | The owner says what it should become |
 | Switching a session to another harness (`handoff`) | Governance spec, section 6 | Same-harness switching (stages 3 and 4) shows the need |
 | A supervising daemon | Product-shape draft, "The daemon, if it is built" | Schedules or a second platform make the need concrete |
