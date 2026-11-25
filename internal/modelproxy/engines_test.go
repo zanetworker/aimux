@@ -675,3 +675,19 @@ func TestHandler_AHelloDoesNotWaitOnAStalledUpstream(t *testing.T) {
 		t.Fatalf("HTTP %d after %v; a stalled upstream gets the answer the proxy gave before, soon", res.Code, took)
 	}
 }
+
+func TestHandler_AHelloNeverPassesARedirectBack(t *testing.T) {
+	upstream, _ := anthropicStandIn(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://elsewhere.invalid/api/hello", http.StatusFound)
+	})
+	engine, err := WithAnthropic(upstream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend, _ := newFakeBackend(t)
+	res := httptest.NewRecorder()
+	NewHandler(backend, testKey, engine).ServeHTTP(res, httptest.NewRequest(http.MethodHead, "/k/"+testKey+"/api/hello", nil))
+	if res.Code != http.StatusNotFound || res.Header().Get("Location") != "" {
+		t.Fatalf("HTTP %d, Location %q", res.Code, res.Header().Get("Location"))
+	}
+}

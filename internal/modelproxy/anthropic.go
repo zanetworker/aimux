@@ -186,6 +186,11 @@ func (e *anthropicEngine) hello(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		// A redirect is not passed back: a client that followed it could name the address it came from, which
+		// holds the key.
+		return false
+	}
 	header := w.Header()
 	for name, values := range resp.Header {
 		if !hopByHop(name, resp.Header) {
