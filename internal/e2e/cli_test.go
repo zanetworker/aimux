@@ -208,3 +208,33 @@ func TestUpgradeUnknownService(t *testing.T) {
 		t.Errorf("error should list the valid names: %s", out)
 	}
 }
+
+// With no ledger yet, aimux cost answers with an empty, complete report and exits 0.
+func TestCostJSON(t *testing.T) {
+	cmd := exec.Command(binaryPath, "cost", "--json")
+	cmd.Env = append(os.Environ(), "HOME="+t.TempDir())
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("cost --json failed: %v\n%s", err, out)
+	}
+	var report struct {
+		Rows       []json.RawMessage `json:"rows"`
+		Incomplete bool              `json:"incomplete"`
+		Total      struct {
+			Requests int `json:"requests"`
+		} `json:"total"`
+	}
+	if err := json.Unmarshal(out, &report); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, out)
+	}
+	if report.Rows == nil || len(report.Rows) != 0 || report.Incomplete || report.Total.Requests != 0 {
+		t.Fatalf("unexpected report: %s", out)
+	}
+}
+
+func TestCostBadBy(t *testing.T) {
+	out, err := exec.Command(binaryPath, "cost", "--by", "week").CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "session, model or day") {
+		t.Fatalf("cost --by week: %v\n%s", err, out)
+	}
+}

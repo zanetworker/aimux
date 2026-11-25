@@ -39,6 +39,7 @@ func init() {
 	rootCmd.Flags().Bool("web", false, "Launch TUI + web dashboard")
 	rootCmd.AddCommand(newStatusCmd())
 	rootCmd.AddCommand(newUpgradeCmd())
+	rootCmd.AddCommand(newCostCmd())
 }
 
 func Execute(version string) {
