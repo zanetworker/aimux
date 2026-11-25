@@ -38,8 +38,8 @@ Three things hold on the way there:
 | | |
 |---|---|
 | In progress | Stage 1: the plan is written (`2026-11-25-stage-1-ledger.md`) and waits for the owner's review |
-| Next | Stage 2: the entry wrapper, the parts menu, generated job files |
-| Waiting on the owner | His review of the stage 3 plan, and whether stage 3 goes ahead of stage 2; see "Waiting on the owner" |
+| Next | Stage 3: a second engine, by choice (plan: `2026-11-25-stage-3-second-engine.md`). Stage 2 follows it |
+| Waiting on the owner | Nothing that blocks; see "Waiting on the owner" |
 
 ## Stages
 
@@ -48,9 +48,9 @@ A stage is done when its "done when" line is true on the owner's machine, not wh
 | Stage | Delivers | Done when | Roadmap items | State |
 |---|---|---|---|---|
 | 0. Land what is waiting | Promote survives a cold start; `aimux upgrade`; the MCP proxy on its own copy; the two flaky tests | A promote has passed with the retry in place; `aimux upgrade` has moved the live model proxy, collector and MCP proxy, so `aimux status` shows no service running `~/go/bin/aimux` and a `go install` changes none; a broken build has been rolled back once on purpose; both flaky tests pass 20 runs in a row | Small work below | In progress: everything is built and the three services are moved. Two parts of its "done when" are not yet true: no promote has run since the retry was added, and a rollback has only been seen on a test job |
-| 1. One record | Ledger files written by the model proxy; a reader; a first meter | `aimux cost` shows requests and tokens per session and model for a day of real use, and its totals match `aimux model proxy stats` | Slice 1 | In progress. Everything is built: the schema, writer and reader ([#138](https://github.com/zanetworker/aimux/pull/138)), what identifies a turn ([#139](https://github.com/zanetworker/aimux/pull/139)), the model proxy writing a line per call ([#140](https://github.com/zanetworker/aimux/pull/140)), and `aimux cost`. Left: the owner promotes the model proxy, then a day of real use closes the stage |
+| 1. One record | Ledger files written by the model proxy; a reader; a first meter | `aimux cost` shows requests and tokens per session and model for a day of real use, and its totals match `aimux model proxy stats` | Slice 1 | In progress. Everything is built: the schema, writer and reader ([#138](https://github.com/zanetworker/aimux/pull/138)), what identifies a turn ([#139](https://github.com/zanetworker/aimux/pull/139)), the model proxy writing a line per call ([#140](https://github.com/zanetworker/aimux/pull/140)), and `aimux cost`. The model proxy was moved to build 228 on 2026-11-25 and writes the ledger. Left: a day of real use, then the count is compared with the request history's |
 | 2. One way in, and identity | The entry wrapper behind `claude-codex`; the registry of parts; the parts menu in `aimux setup`; `enable`, `disable`; job files generated from the registry | A background call carries its session in the ledger; the model proxy's job file is one aimux wrote | Slice 2, base items B1 and B3 | Not started |
-| 3. A second engine, by choice | Anthropic passthrough and a sandbox entrance; switching model by hand in a session | A Claude session routed through the proxy runs a streamed tool call on Anthropic, then continues on Codex | Slice 8a | Plan written (`2026-11-25-stage-3-second-engine.md`), waiting for review. The host path does not wait on the sandbox half of 0a; the sandbox entrance does |
+| 3. A second engine, by choice | Anthropic passthrough and a sandbox entrance; switching model by hand in a session | A Claude session routed through the proxy runs a streamed tool call on Anthropic, then continues on Codex | Slice 8a | In progress. Plan: `2026-11-25-stage-3-second-engine.md`, six tasks, the internal gateway as the sixth. The host path does not wait on the sandbox half of 0a; the sandbox entrance does |
 | 4. The right model per task | Roles mapped to engines; fallback on a limit error | A helper runs on another engine than its main conversation without being told to, and the ledger shows both | Slices 8b, 8c | Not started |
 | 4, in parallel. Evals resume | In the eval session: contracts, detection in shadow, migration, the review queue | A correction made in a Codex session appears in the review queue | Eval phases 0 to 3; base item B5, built in this stage | Paused by the owner. Resumes after stage 1 only on his word |
 | 5. See everything | Hooks report tool calls; the MCP proxy and tool gateway write lines; changed tools flagged on the host | One session's timeline shows its model calls, built-in tools and MCP tools, each with its source | Slices 3, 4 | Not started |
@@ -136,6 +136,7 @@ Base items from the product-shape draft: B1 the registry of parts, B2 the servic
 | 2026-11-25 | Routing per task and evals move ahead of the reporting hook; schedules and `aimux run` go last | The owner ranks them higher, and neither needs the hook |
 | 2026-11-25 | The inference proxy in front of every session is a separate, late stage with a checklist | It would make the proxy a dependency of every session |
 | 2026-11-25 | At most two pre-push review rounds per change, then it ships with the open findings listed, unless a P0 is open | `aimux upgrade` took six rounds; each found narrower cases and cost about eight minutes |
+| 2026-11-25 | Stage 3 (a second engine) is built before stage 2 (entry wrapper, parts menu) | The owner approved it: the two do not depend on each other, and the second engine changes what he can do each day |
 | 2026-11-25 | Pull requests stay small | The same change was 2,200 lines, which is what made each round slow |
 
 ## Paused or parked
@@ -167,7 +168,7 @@ Base items from the product-shape draft: B1 the registry of parts, B2 the servic
 
 ## Waiting on the owner
 
-1. To review the plan for stage 3 (`2026-11-25-stage-3-second-engine.md`), and to say whether it goes ahead of stage 2. The two do not depend on each other; the tracker's order has stage 2 first. The model proxy was moved to build 228 with `aimux upgrade model-proxy` on 2026-11-25 and writes the ledger since then; stage 1 closes after a day of use.
+1. In stage 3's last task: an interactive `/model` round trip between Anthropic and Codex, which only he can drive, and turning the Anthropic engine on for the stable proxy.
 2. Whether evals resume right after stage 1 for the parts that need only the turn id.
 3. Whether the hook may ever refuse a tool call. Slice 3 is report-only whatever the answer.
 4. Whether there is a source for Claude's remaining allowance. Without one the limit error is the only trigger.

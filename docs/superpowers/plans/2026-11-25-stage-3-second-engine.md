@@ -36,7 +36,7 @@ Codex appears twice in the picture. Behind the proxy it is an engine, which exis
 - The caller's credential is forwarded and never stored, logged, written to the ledger or the request history, or echoed in an error.
 - The proxy key is never forwarded upstream.
 - The proxy key is still required for the Codex engine, which spends the owner's Codex login. A request without it gets no Codex answer.
-- A request body and a response body pass through unchanged, byte for byte. The proxy reads the usage figures from the response as it passes; it stores no content.
+- A request body and a response body pass through unchanged, byte for byte. The proxy reads the usage figures from the response as it passes; it stores no content. There is one stated exception: the answer to `GET /v1/models`, to which the proxy adds its other engines' models (task 3). Task 6 adds a second: the model name in a request to a named upstream loses its prefix.
 - Nothing switches a conversation's engine by itself in this stage. The engine follows the model the client names.
 - A change of engine inside a session is written to the ledger as a `switch` line.
 - The sandbox entrance is not in this stage: its test is still open with the Wingman session.
@@ -216,6 +216,7 @@ func WithAnthropic(upstream string) HandlerOption
 ```
 
 - `ledger.Line` gains, for `switch` lines: `FromEngine string` (`aimux.from_engine`) and `ToEngine string` (`aimux.to_engine`). A `switch` line carries the session and the turn.
+- An Anthropic request does not pass `mapRequest`, which is where a Codex request gets its session. Its session, agent id, side flag and turn come from the same code the ledger line already uses (`startModelCall`: the metadata's session id whatever model is named, else the session header; `requestShape` on the message list), so both engines number one session's turns from one table.
 - The turn table remembers each session's last engine. When a main-conversation request is answered by another engine than the session's last one, the proxy writes a `switch` line before the `model_call` line. A side request never writes one.
 - For an Anthropic call the `model_call` line has `Engine` `"anthropic"`, `ResponseModel` from the response, tokens from the response (input is the whole prompt: uncached plus cache read plus cache creation), `CacheWrite` the cache-creation tokens, `Estimated` false, and when the response carried no usage, `aimux.usage.unknown: true` (new field `UsageUnknown`) instead of zeros.
 - `GET /v1/models` with the Anthropic engine on, and a request carrying the caller's own login, is forwarded to Anthropic and the Codex models are appended to its list; otherwise it answers as today.
@@ -274,7 +275,7 @@ Then `git ship -m "feat(modelproxy): the engine follows the model named and the 
 - Modify: `docs-site/src/content/docs/advanced/model-proxy-channels.mdx`, `README.md`, the tracker
 
 **Interfaces:**
-- Produces: `aimux model proxy env [--port N]`, which prints shell lines for `eval`. It sets `ANTHROPIC_BASE_URL` (and whatever task 1 chose to carry the proxy key), unsets `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` so the subscription login is used, and sets nothing about the model. It prints to stdout only what is safe to `eval`, and one line to stderr saying what the session will do. It fails, printing nothing to stdout, when the proxy does not answer or was started without `--anthropic`.
+- Produces: `aimux model proxy env [--port N]`, which prints shell lines for `eval`. It sets `ANTHROPIC_BASE_URL` (and whatever task 1 chose to carry the proxy key), unsets `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` so the subscription login is used, and sets nothing about the model. It prints to stdout only what is safe to `eval`, and one line to stderr saying what the session will do. `aimux model proxy env --off` prints the lines that undo it: it unsets every variable the first form set, the one carrying the proxy key included, so a shell that goes back to direct access cannot send the proxy key to Anthropic. It needs no running proxy. It fails, printing nothing to stdout, when the proxy does not answer or was started without `--anthropic`.
 
 - [ ] **Step 1: Write the failing tests** in `model_proxy_env_test.go`:
 
@@ -289,6 +290,10 @@ func TestProxyEnv_FailsWhenAnthropicIsOff(t *testing.T)
 // the proxy answers and its health says the Anthropic engine is off: an error naming the flag, stdout empty.
 
 func TestProxyEnv_NeverPrintsTheKeyToStderr(t *testing.T)
+
+func TestProxyEnv_OffUnsetsEverythingOnSet(t *testing.T)
+// every variable the first form exports or unsets-and-replaces appears in an unset line of --off; after
+// evaluating both in a shell, no variable holds the proxy key. --off works with nothing listening.
 ```
 
 - [ ] **Step 2: Implement.** `Liveness` gains `Engines []string` (`"codex"`, `"anthropic"`), which `env` and `aimux status` read.
@@ -303,13 +308,13 @@ Expected: the answer arrives; `aimux cost --by model` shows one call with engine
 **Files:**
 - Modify: `docs/superpowers/plans/governance-roadmap.md`, `docs/superpowers/specs/2026-11-25-second-engine-evidence.md`
 
-- [ ] **Step 1: Measure what the proxy costs.** Twenty short `claude -p` turns direct and twenty through the dev proxy on Anthropic. Write the median time to first byte of each in the tracker. The spec's bound is about 33 ms added.
+- [ ] **Step 1: Measure what the proxy costs.** Twenty short `claude -p` turns direct and twenty through the dev proxy on Anthropic. Write the median time to first byte of each in the tracker. The spec's bound is about 33 ms added. The stage is not marked done while the difference is above that, unless the owner accepts the measured figure, which is then written in the decision log.
 
 - [ ] **Step 2: The owner checks what `claude -p` cannot.** In one interactive session started with `eval "$(aimux-dev model proxy env --port 7386)"`: a prompt with a tool call on a Claude model; `/model` to a `codex:` model and a prompt that refers to the first; `/model` back and a prompt that refers to both. This is roadmap item 5 under "Not yet verified" (a transcript written under Codex, continued on Anthropic).
 Expected: all three answers arrive and recall what came before; `aimux cost --session <id>` shows both engines; the ledger has two `switch` lines.
 
 - [ ] **Step 3: A dead proxy.** Stop the dev proxy with a session pointed at it and send a prompt.
-Expected: Claude Code reports a connection error. Write down exactly what the owner sees and the one command that returns the shell to going direct (`unset ANTHROPIC_BASE_URL`), in the guide.
+Expected: Claude Code reports a connection error. Write down exactly what the owner sees and the one command that returns the shell to going direct (`eval "$(aimux model proxy env --off)"`, which also removes the proxy key from the shell), in the guide.
 
 - [ ] **Step 4: The owner turns it on for the stable proxy** by adding `--anthropic` to its job and running `aimux upgrade model-proxy`. Mark stage 3 done in the tracker when step 2 has passed on the stable proxy.
 
