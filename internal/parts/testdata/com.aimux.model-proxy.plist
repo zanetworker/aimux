@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>HOME</key>
+		<string>/Users/someone</string>
+		<key>PATH</key>
+		<string>/Users/someone/bin:/usr/bin:/bin</string>
+	</dict>
+	<key>KeepAlive</key>
+	<true/>
+	<key>Label</key>
+	<string>com.aimux.model-proxy</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/someone/.aimux/services/model-proxy/aimux</string>
+		<string>model</string>
+		<string>proxy</string>
+		<string>serve</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>/Users/someone/.aimux/logs/model-proxy/stderr.log</string>
+	<key>StandardOutPath</key>
+	<string>/Users/someone/.aimux/logs/model-proxy/stdout.log</string>
+</dict>
+</plist>
