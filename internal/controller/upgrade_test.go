@@ -509,6 +509,7 @@ func TestUpgradeServices_InterruptedUpgradeRollsBack(t *testing.T) {
 
 	// The interrupt arrives once the new build has been started, however slow the machine is.
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	started := time.Now()
 	results := UpgradeServices(ctx, []UpgradeService{{
 		ID: "model-proxy", Name: "model proxy", Dir: dir, Job: interruptAfterPoint{l, cancel}, Probe: l.probe("model proxy"),
@@ -678,6 +679,7 @@ func TestUpgradeServices_InterruptBeforeTheFirstChange(t *testing.T) {
 	pid := l.proc.Process.Pid
 	dir := filepath.Join(t.TempDir(), "model-proxy")
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	interrupting := StatusProbe{Name: "model proxy", Run: func(ctx context.Context) ServiceStatus {
 		cancel()
 		return l.probe("model proxy").Run(ctx)
