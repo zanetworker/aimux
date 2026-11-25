@@ -41,6 +41,9 @@ type PartService struct {
 	// ProbeFor, when set, gives the probe for the service as it runs with the given arguments (those after the
 	// program). A service whose address is in its arguments is asked where it will be, not where it usually is.
 	ProbeFor func(args []string) StatusProbe
+	// CLIBuild is the build of the aimux making the change. A service that reports another build has its
+	// arguments left alone until it is upgraded: it may not know the ones it would be given.
+	CLIBuild string
 	// Hold, when set, takes whatever other lock guards the service for the length of a change.
 	Hold func() (release func(), err error)
 }
@@ -163,6 +166,14 @@ func planService(part string, svc PartService, stated parts.PartSettings) JobCha
 	}
 	change.Was, change.Now, change.sum = current[1:], wanted[1:], sha256.Sum256(file)
 	if !parts.SameArgs(svc.Service, current, wanted) {
+		if svc.CLIBuild != "" {
+			// The rule status uses for "older than the CLI": the same release, fewer commits.
+			row := runStatusProbe(context.Background(), svc.probeFor(current[1:]), statusProbeLimit)
+			if problem, older := olderBuild(&row, svc.CLIBuild); row.State != ServiceDown && older {
+				change.Note = fmt.Sprintf("its %s, so it may not know the arguments it would be given; bring it up to date first: %s", problem, svc.Service.Update)
+				return change
+			}
+		}
 		change.Action, change.Restarts = ActionChange, true
 		return change
 	}

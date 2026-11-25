@@ -78,6 +78,7 @@ func partServices(home, version string, cfg config.Config) []controller.PartServ
 		}
 		services = append(services, controller.PartService{
 			Service: service, Dir: filepath.Join(home, ".aimux", "services", service.ID), Probe: probes[at], ProbeFor: probeFor, Hold: hold,
+			CLIBuild: version,
 			Job: launchdPartJob{job: launchdJob{agent: mcpproxy.Agent{
 				Label:     service.Label,
 				PlistPath: filepath.Join(home, "Library", "LaunchAgents", service.Label+".plist"),
@@ -155,6 +156,9 @@ func runSetupParts(ctx context.Context, configPath string, services []controller
 		if pending {
 			return errPartsWouldChange
 		}
+		if o.apply {
+			return leftAlone(plan)
+		}
 		return nil
 	}
 	var restarting []string
@@ -204,7 +208,23 @@ func runSetupParts(ctx context.Context, configPath string, services []controller
 	if errors.Is(applyErr, controller.ErrStalePlan) {
 		return fmt.Errorf("%w; nothing was changed. Run it again", applyErr)
 	}
-	return applyErr
+	if applyErr != nil {
+		return applyErr
+	}
+	return leftAlone(plan)
+}
+
+// errLeftAlone is an apply after which a service still does not match the settings, because it could not be
+// managed as things are. An apply that leaves that behind does not report success.
+var errLeftAlone = errors.New("a service does not match the settings and was left alone")
+
+func leftAlone(plan []controller.JobChange) error {
+	for _, line := range plan {
+		if line.Action == controller.ActionSkip {
+			return fmt.Errorf("%w: the %s: %s", errLeftAlone, parts.MustService(line.Service).Name, line.Note)
+		}
+	}
+	return nil
 }
 
 // samePlan reports whether two plans say the same thing to the owner.
@@ -245,7 +265,11 @@ func writePartsPlan(out io.Writer, configPath string, s parts.Settings, plan []c
 		_, _ = fmt.Fprintf(table, "%s\t%s\t%s\t%s\n", line.Part, parts.MustService(line.Service).Name, will, detail)
 	}
 	_ = table.Flush()
+	leftAlone := slices.ContainsFunc(plan, func(c controller.JobChange) bool { return c.Action == controller.ActionSkip })
 	switch {
+	case !pending && leftAlone:
+		// Not "nothing to change": the settings may ask for something that cannot be done as things are.
+		_, _ = fmt.Fprintln(out, "\nNothing can be changed as things are: see what is left alone, and why, above.")
 	case !pending:
 		_, _ = fmt.Fprintln(out, "\nNothing to change.")
 	case !applying:

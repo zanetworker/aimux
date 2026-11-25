@@ -381,3 +381,46 @@ func TestApplyParts_AnInterruptBeginsNothingFurther(t *testing.T) {
 		t.Fatalf("after an interrupt: %+v (%d reloads of the second)", results, secondJob.count())
 	}
 }
+
+// A service that runs an older build than the aimux changing its job may not know the arguments it is about to be
+// given. It is upgraded first; the change is not tried and rolled back.
+func TestPlanParts_AServiceOnAnotherBuildIsUpgradedFirst(t *testing.T) {
+	service, job := testProxyService(t, testJobFile)
+	started := time.Now().Add(-time.Hour)
+	service.Probe = StatusProbe{Name: "model proxy", Run: func(context.Context) ServiceStatus {
+		return ServiceStatus{Name: "model proxy", State: ServiceOK, StartedAt: &started, Build: "v0.14.0-249-gaa18bfeb"}
+	}}
+	service.CLIBuild = "v0.14.0-276-g823bd6f3"
+	want := settings(t, proxyOn+"    engines:\n      anthropic: {}\n")
+	plan := PlanParts([]PartService{service}, want)
+	if len(plan) != 1 || plan[0].Action != ActionSkip || !strings.Contains(plan[0].Note, "aimux upgrade model-proxy") || !strings.Contains(plan[0].Note, "249") {
+		t.Fatalf("plan = %+v", plan)
+	}
+	if results, err := ApplyParts(context.Background(), []PartService{service}, want, plan, ApplyOptions{}); err != nil || results[0].Outcome != ApplySkipped || job.count() != 0 {
+		t.Fatalf("%+v, %v", results, err)
+	}
+	// Taking it under management changes nothing in what it runs, so the build does not matter for that.
+	if plan := PlanParts([]PartService{service}, settings(t, proxyOn)); plan[0].Action != ActionAdopt {
+		t.Errorf("adopting a service on another build: %+v", plan)
+	}
+	// On the same build the change goes ahead.
+	service.CLIBuild = "v0.14.0-249-gaa18bfeb"
+	if plan := PlanParts([]PartService{service}, want); plan[0].Action != ActionChange {
+		t.Errorf("the same build: %+v", plan)
+	}
+	// A service newer than this aimux, or a build with no number, is not held back.
+	for _, cli := range []string{"v0.14.0-200-g0000000", "dev"} {
+		service.CLIBuild = cli
+		if plan := PlanParts([]PartService{service}, want); plan[0].Action != ActionChange {
+			t.Errorf("an aimux of build %q: %+v", cli, plan)
+		}
+	}
+	// A service that does not say its build, or does not answer, is not held back by this: the roll-back is there.
+	service.Probe = StatusProbe{Name: "model proxy", Run: func(context.Context) ServiceStatus {
+		return ServiceStatus{Name: "model proxy", State: ServiceDown}
+	}}
+	service.CLIBuild = "v0.14.0-276-g823bd6f3"
+	if plan := PlanParts([]PartService{service}, want); plan[0].Action != ActionChange {
+		t.Errorf("a service that does not answer: %+v", plan)
+	}
+}

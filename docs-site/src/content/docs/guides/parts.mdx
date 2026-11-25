@@ -118,7 +118,10 @@ What it will and will not touch in a job file:
 - It changes only the arguments that come from the settings: the port, the Codex tier and program, and the engines. The job's environment, its log paths, when it restarts, and any other argument you added by hand stay as they are. An argument of that list which you set by hand is kept until the file states that setting; then the file wins.
 - Taking a service under management costs nothing: when its job already runs what the settings state, the file is not rewritten and the service is not restarted.
 - The job file as it was before aimux first managed it is kept in `~/.aimux/services/<service>/job.before-aimux.plist`.
+- A service that runs an older build than the `aimux` you typed is not given new arguments: it may not know them. The table says so and names `aimux upgrade <service>`, which comes first.
 - A job file it cannot read safely is left alone, with the reason: one with a separate `Program` key, a comment, or arguments after a bare `--`.
+
+`--apply` exits 1 when a service the settings are about was left alone, as it does when a restart failed: the machine does not match the file, and the output says why. `--check` in the same case exits 0, since nothing would change.
 
 If a service does not answer after its restart, its old job file is written back and it is started from that again. The command says so and exits 1. That holds when you interrupt it while it waits: the wait ends, and the job file still goes back before the command returns. The service is asked on the port its new arguments give it, so changing the port is not mistaken for a service that did not come up.
 

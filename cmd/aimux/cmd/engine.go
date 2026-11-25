@@ -70,6 +70,12 @@ func (p partsChange) run(ctx context.Context, edit func(configPath string) error
 		return errors.New("the file holds the change and the service was not restarted; to apply it later: aimux setup --apply")
 	case errors.Is(err, errNeedsYes):
 		return fmt.Errorf("the file holds the change; %w", err)
+	case errors.Is(err, errLeftAlone):
+		// Said below for the part this command was about, when it is that one.
+		if own := p.leftAsItWas(); own != nil {
+			return own
+		}
+		return fmt.Errorf("the file holds the change; %w", err)
 	case err != nil:
 		return err
 	}

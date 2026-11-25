@@ -181,3 +181,23 @@ func TestSetupParts_TheFileChangedWhileTheQuestionStood(t *testing.T) {
 		t.Fatalf("err = %v; a yes to an old plan was applied to a new file", err)
 	}
 }
+
+func TestSetupParts_LeftAloneIsNotNothingToChange(t *testing.T) {
+	path, services, job := partsFixture(t, anthropicOn)
+	original, _ := job.Read()
+	// A job that starts something aimux does not recognise: left alone.
+	if err := job.Write([]byte(strings.Replace(string(original), "<string>serve</string>", "<string>status</string>", 1))); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := runSetupParts(context.Background(), path, services, setupPartsOpts{}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "Nothing to change.") || !strings.Contains(out.String(), "left alone") {
+		t.Errorf("output:\n%s", out.String())
+	}
+	// Asked to apply, it does not report success: the proxy still does not match the settings.
+	if err := runSetupParts(context.Background(), path, services, setupPartsOpts{apply: true, yes: true}, &out); !errors.Is(err, errLeftAlone) || !strings.Contains(err.Error(), "model proxy") || job.reloads() != 0 {
+		t.Errorf("apply: %v", err)
+	}
+}
