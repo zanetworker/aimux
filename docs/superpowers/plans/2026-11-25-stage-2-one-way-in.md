@@ -8,7 +8,7 @@
 
 **Tech Stack:** Go, cobra, `gopkg.in/yaml.v3` (its `Node` tree gives each value's line and column; the edit itself is on the source text), launchd through `internal/mcpproxy.Agent`. No new dependency.
 
-**Spec:** `docs/superpowers/specs/2026-11-25-aimux-product-shape-draft.md` ("Turn on what you want", "Who keeps the services alive", "One configuration, four ways to change it", base items B1 and B3); `docs/superpowers/specs/2026-11-23-aimux-governance-metering-and-evals-design.md` ("The entry wrapper"). Tracker: `docs/superpowers/plans/governance-roadmap.md`, stage 2.
+**Spec:** `docs/superpowers/specs/2026-11-25-parts-settings.md` (the shape of the `parts:` section, and the rules it follows: where this plan and that page differ, the page is right); `docs/superpowers/specs/2026-11-25-aimux-product-shape-draft.md` ("Turn on what you want", "Who keeps the services alive", "One configuration, four ways to change it", base items B1 and B3); `docs/superpowers/specs/2026-11-23-aimux-governance-metering-and-evals-design.md` ("The entry wrapper"). Tracker: `docs/superpowers/plans/governance-roadmap.md`, stage 2.
 
 <!-- no-images: one table of tasks and one of decisions; the draft carries the figures -->
 
@@ -95,6 +95,8 @@ func Parts() []Part                  // in menu order
 
 ### Task 2: The `parts:` section
 
+The shape, every key's meaning when it is left out, and the rules are in `../specs/2026-11-25-parts-settings.md`. This task implements that page. Two things from it reach beyond the file: a model naming a disabled or unknown engine is refused by the proxy and never answered by another engine (today it falls through when no upstream is configured), and the proxy is handed a key reference, never a key. Both are built here, in the proxy, with their tests.
+
 **Files:**
 - Create: `internal/parts/settings.go`, `internal/parts/settings_test.go`, `internal/parts/edit.go`, `internal/parts/edit_test.go`, `internal/parts/testdata/*.yaml`
 - Modify: `cmd/aimux/cmd/setup.go` (`--check`), docs
@@ -114,9 +116,12 @@ type PartSettings struct {
 	                                  // Codex is built in: it can be given a tier, never removed
 }
 type Engine struct {
-	Enabled     bool   // off keeps a named upstream's address, so it can be turned on again without retyping it
-	Address     string // a named upstream's address; empty for anthropic and codex
-	ServiceTier string // codex only
+	Type        string         // "codex", "anthropic", "messages"
+	Enabled     *bool          // nil: on, for an engine that is listed
+	URL         string         // a messages engine
+	Key         *secretref.Ref // a messages engine; nil: the Keychain item <name>-key
+	ServiceTier string         // codex
+	Binary      string         // codex
 }
 
 func Load(path string) (Settings, error)             // a missing file or section is the zero value
