@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** One file says which parts of aimux are on and how; aimux writes each service's job file from it; and one line points a shell's sessions at aimux. After this stage, turning the Anthropic engine on is `aimux engine add anthropic`, not an edit of a launchd file.
+**Goal:** One file says which parts of aimux are on and how; aimux writes each service's job file from it; and one line points a shell's sessions at aimux. After this stage, turning the Anthropic engine on is `aimux engine enable anthropic`, not an edit of a launchd file.
 
 **Architecture:** A registry in code lists every part and the services it needs: label, port, arguments, health probe. `status`, `upgrade`, `doctor` and `setup` read it where each keeps its own list today. A `parts:` section in `~/.aimux/config.yaml` holds what the owner wants. `aimux setup --apply` compares each service's job file with what the registry and the file produce, and changes only what differs, through the restart-check-roll-back path `aimux upgrade` already has. The operating system stays the supervisor; no daemon.
 
@@ -51,7 +51,7 @@ So this stage is mostly the registry, the file and the job files.
 | 1 | The registry of parts and services | Nothing new. `status` and `upgrade` read one table |
 | 2 | The `parts:` section: read it, and edit it without losing comments | `aimux setup --check`, which prints what the file says and changes nothing |
 | 3 | Job files written from the registry and the file | `aimux setup --apply`: the model proxy's job file is one aimux wrote |
-| 4 | `aimux engine add`, `remove`, `list`; `aimux enable`, `disable` | Turn the Anthropic engine or the gateway on with one command |
+| 4 | `aimux engine enable`, `disable`, `add`, `remove`, `list`; `aimux enable`, `disable` for parts | Turn the Anthropic engine or the gateway on with one command |
 | 5 | The parts menu in `aimux setup` | Pick parts from a list |
 | 6 | The Codex-only entry line, telemetry, and the close | Replace the body of `claude-codex` with one line |
 
@@ -114,6 +114,7 @@ type PartSettings struct {
 	                                  // Codex is built in: it can be given a tier, never removed
 }
 type Engine struct {
+	Enabled     bool   // off keeps a named upstream's address, so it can be turned on again without retyping it
 	Address     string // a named upstream's address; empty for anthropic and codex
 	ServiceTier string // codex only
 }
@@ -181,10 +182,10 @@ type JobChange struct {
 - Modify: `internal/controller/apply.go`, `internal/e2e/` (the new commands), docs, README
 
 **Interfaces:**
-- Produces: `aimux engine list` (each engine of the inference proxy, on or off, with what the running proxy's `/healthz` says beside it); `aimux engine add anthropic`; `aimux engine add <name>=<address>`; `aimux engine remove <name>` (refused for `codex`, before the file is touched); `aimux enable <part>`; `aimux disable <part>`. Each edits the file with `parts.Set`, prints what `--apply` would do, and applies after a yes (`--yes` to skip the question, `--no-apply` to only edit). `--json` on all.
+- Produces: `aimux engine list` (each engine of the inference proxy, on or off, with what the running proxy's `/healthz` says beside it); `aimux engine enable <name>` and `aimux engine disable <name>`, which switch an engine that exists (`anthropic`, or a named upstream already added) and keep its address; `aimux engine add <name>=<address>`, which tells aimux a named upstream exists and turns it on; `aimux engine remove <name>`, which forgets it. Two verbs for two things: Anthropic is built in, so there is nothing to add, only to switch on. `disable codex` and `remove codex` are refused before the file is touched, and so are `add anthropic` and `add codex`, with the command that was meant; `aimux enable <part>`; `aimux disable <part>`. Each edits the file with `parts.Set`, prints what `--apply` would do, and applies after a yes (`--yes` to skip the question, `--no-apply` to only edit). `--json` on all.
 - `aimux engine add <name>=<address>` checks that the secret-store entry `<name>-key` exists, without reading it, and says how to create it when it does not.
-- [ ] **Step 1: Write the failing tests**, the e2e ones included: add, list, remove, each with `--no-apply` against a temp home; a bad name and a bad address refused before the file is touched; `disable inference-proxy` stops the job and leaves the file saying so; `enable mcp-proxy` and `disable mcp-proxy` run the MCP proxy's own install and uninstall, and a tool answers through the proxy after one and directly after the other.
-- [ ] **Step 2: Implement. Step 3: The owner runs** `aimux engine add anthropic` on his machine. Expected: the stable proxy restarts with `--anthropic`, and `aimux model proxy env` now succeeds against it. This is also the last step of stage 3.
+- [ ] **Step 1: Write the failing tests**, the e2e ones included: enable, disable, add, list, remove, each with `--no-apply` against a temp home; a named upstream disabled and enabled again keeps its address; a bad name and a bad address refused before the file is touched; `disable inference-proxy` stops the job and leaves the file saying so; `enable mcp-proxy` and `disable mcp-proxy` run the MCP proxy's own install and uninstall, and a tool answers through the proxy after one and directly after the other.
+- [ ] **Step 2: Implement. Step 3: The owner runs** `aimux engine enable anthropic` on his machine. Expected: the stable proxy restarts with `--anthropic`, and `aimux model proxy env` now succeeds against it. This is also the last step of stage 3.
 - [ ] **Step 4: Full suite, docs, commit, pull request.**
 
 ### Task 5: The parts menu
@@ -212,7 +213,7 @@ type JobChange struct {
 
 | # | Decision | Recommended | The other way |
 |---|---|---|---|
-| 1 | How an engine is turned on | `aimux engine add anthropic`, `aimux engine add enmaas=<address>` | A flag on `aimux enable inference-proxy`; fewer commands, harder to read back |
+| 1 | How an engine is turned on | Decided: `enable` and `disable` switch an engine that exists (`aimux engine enable anthropic`); `add` and `remove` are for a named upstream, which needs an address (`aimux engine add enmaas=<address>`) | A flag on `aimux enable inference-proxy`; fewer commands, harder to read back |
 | 2 | What aimux does with a job file that exists | Changes only the program and the arguments that come from the settings; keeps everything else; refuses a file it cannot split | Rewrites the whole file from the registry; one known shape, and it would drop anything set by hand (a port, `--codex-command`, the service's PATH) |
 | 3 | Who owns the shell function | The owner keeps `claude-codex`; its body becomes one line that calls aimux | aimux installs its own shell integration; one more thing that edits `~/.zshrc` |
 
