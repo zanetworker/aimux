@@ -6,7 +6,7 @@
 
 **Architecture:** A registry in code lists every part and the services it needs: label, port, arguments, health probe. `status`, `upgrade`, `doctor` and `setup` read it where each keeps its own list today. A `parts:` section in `~/.aimux/config.yaml` holds what the owner wants. `aimux setup --apply` compares each service's job file with what the registry and the file produce, and changes only what differs, through the restart-check-roll-back path `aimux upgrade` already has. The operating system stays the supervisor; no daemon.
 
-**Tech Stack:** Go, cobra, `gopkg.in/yaml.v3` (its `Node` tree, to edit the file without losing comments), launchd through `internal/mcpproxy.Agent`. No new dependency.
+**Tech Stack:** Go, cobra, `gopkg.in/yaml.v3` (its `Node` tree gives each value's line and column; the edit itself is on the source text), launchd through `internal/mcpproxy.Agent`. No new dependency.
 
 **Spec:** `docs/superpowers/specs/2026-11-25-aimux-product-shape-draft.md` ("Turn on what you want", "Who keeps the services alive", "One configuration, four ways to change it", base items B1 and B3); `docs/superpowers/specs/2026-11-23-aimux-governance-metering-and-evals-design.md` ("The entry wrapper"). Tracker: `docs/superpowers/plans/governance-roadmap.md`, stage 2.
 
@@ -24,11 +24,12 @@ So this stage is mostly the registry, the file and the job files.
 ## Global Constraints
 
 - The owner runs anything that restarts a live service. `--apply` on a job that is running says what will restart and asks, unless `--yes` is given.
-- With no `parts:` section in the file, aimux changes no job file. Nothing moves until the owner asks.
-- A job file aimux did not write is never overwritten silently: the first apply shows the difference and keeps the old file beside the new one.
-- A job that fails its health check after an apply gets its previous job file and its previous program back, as `aimux upgrade` does for the program today.
+- With no `parts:` section in the file, aimux changes no job file. Nothing moves until the owner asks. A part the section does not name stays unmanaged too: naming the inference proxy does not make aimux touch the MCP proxy or the collector. `enabled: false` is the only thing that means "off".
+- aimux changes only what it owns in a job file: the program, and the arguments that come from the settings. Every other key and every other argument stays as it is (an environment, a custom port, `--codex-command`, log paths). A file it cannot read that way, one with a separate `Program` key for example, is refused with the reason, not rewritten. The file as it was before aimux first changed it is kept.
+- A job file whose arguments already match is not rewritten and its service is not restarted. Taking a job under management costs no restart by itself.
+- A job that fails its health check after an apply gets its previous job file back and is started again from it. `aimux upgrade` cannot do this today: when the program is already current it restarts without keeping anything to go back to. Task 3 builds this path and proves it on a job of its own before any live job is touched.
 - The file holds what the owner wants, never what aimux found or wrote, and never a secret.
-- A command that edits the file keeps the owner's comments, order and unknown keys, byte for byte outside the value it changes.
+- A command that edits the file changes the bytes of one value and nothing else: comments, order, indentation, line endings and unknown keys stay. Re-encoding the file from a parsed tree does not give that (it moves comments and normalises indentation), so the edit patches the source text at the value's position and parses the result again to check it. A value reached through an anchor or a merge key is refused, with the line, since changing it would change other places too.
 - Today's flags and job files keep working. A proxy started by hand with `--anthropic` behaves as before.
 - The tool gateway's job is not touched: it runs Wingman's copy, and changes to it are agreed with the Wingman session first.
 - The commands stay `aimux model proxy` and `aimux mcp proxy`. The part is shown as "Inference proxy", with the id `inference-proxy`; renaming the command is not in this stage.
@@ -70,7 +71,8 @@ type Service struct {
 	ID      string // "model-proxy": what `aimux upgrade` is given
 	Name    string // "model proxy": what a table shows
 	Label   string // the launchd label, "com.aimux.model-proxy"
-	Port    int
+	Port    int      // the default. Where a running service is found stays each service's own rule: the MCP
+	                 // proxy's recorded port, the collector's configured one, the gateway's socket
 	Serve   []string // arguments after the program, before any from settings: {"model","proxy","serve"}
 	Managed bool     // false: aimux upgrade and setup leave its job alone (the tool gateway)
 	Update  string   // for an unmanaged service, the command that updates it
@@ -87,7 +89,7 @@ func ServiceByID(id string) (Service, bool)
 func Parts() []Part                  // in menu order
 ```
 
-- [ ] **Step 1: Write the failing tests.** `TestServices_AreTheOnesStatusAndUpgradeKnow` pins ids, labels and ports against today's literals (`com.aimux.model-proxy` 7385, `com.aimux.mcp-proxy` 7381, `com.azaalouk.aimux-collect` 4318, `com.aimux.tool-gateway` 7390 unmanaged). `TestNoServiceLabelOutsideTheRegistry` walks `cmd/` and `internal/` and fails on a launchd label literal anywhere else, tests excepted.
+- [ ] **Step 1: Write the failing tests.** `TestServices_AreTheOnesStatusAndUpgradeKnow` pins ids, labels and ports against today's literals (`com.aimux.model-proxy` 7385, `com.aimux.mcp-proxy` 7381, `com.azaalouk.aimux-collect` 4318, `com.aimux.tool-gateway` 7390 unmanaged). `TestStatusAndUpgradeReadTheRegistry` fails when `upgrade.go` or `status_probes.go` holds a launchd label literal. `doctor` and the installers keep their own for now; moving them is listed under "Not in this stage", so the registry is the one list for status, upgrade and setup, not yet for everything.
 - [ ] **Step 2: Implement, then replace the two tables.** `aimux status` and `aimux upgrade --dry-run --json` print the same bytes before and after; `TestStatus_*` and `TestUpgrade_*` pass unchanged.
 - [ ] **Step 3: Full suite, commit, pull request.**
 
@@ -108,7 +110,8 @@ type Settings struct {
 }
 type PartSettings struct {
 	Enabled bool
-	Engines map[string]Engine         // inference-proxy only: "anthropic", "codex", or a named upstream
+	Engines map[string]Engine         // inference-proxy only: "anthropic", "codex", or a named upstream.
+	                                  // Codex is built in: it can be given a tier, never removed
 }
 type Engine struct {
 	Address     string // a named upstream's address; empty for anthropic and codex
@@ -124,40 +127,51 @@ func (s Settings) Args(service Service) []string     // the model proxy: --anthr
 func Set(file string, path []string, value any) error
 ```
 
-- [ ] **Step 1: Write the failing tests** from fixtures: `TestLoad_*` (absent, empty, full, an old file with none of it); `TestArgs_*` (each engine alone and together, in a fixed order so a job file does not change when nothing did); `TestSet_KeepsEverythingElse` (comments above and beside the key, anchors, flow style, no trailing newline, CRLF: the bytes outside the changed value are identical); `TestSet_CreatesTheSectionAtTheEnd`; `TestValidate_*`.
+- [ ] **Step 1: Write the failing tests** from fixtures: `TestLoad_*` (absent, empty, full, an old file with none of it); `TestArgs_*` (each engine alone and together, in a fixed order so a job file does not change when nothing did); `TestSet_KeepsEverythingElse` (comments above and beside the key, flow style, tabs in comments, no trailing newline, CRLF: the bytes outside the changed value are identical); `TestSet_RefusesAValueBehindAnAnchorOrMerge`; `TestSet_CreatesTheSectionAtTheEnd`; `TestSet_TheResultParsesToWhatWasAsked`; `TestValidate_*` (removing `codex` is a problem, not a setting).
 - [ ] **Step 2: Implement, add `aimux setup --check`** (prints each part, on or off, and what `--apply` would change; exits 1 when something would change; changes nothing).
 - [ ] **Step 3: Full suite, docs, commit, pull request.**
 
 ### Task 3: Job files from the registry and the file
 
+This is the step that touches a service the owner uses every day. It is built and proven on a job of its own first.
+
 **Files:**
 - Create: `internal/parts/jobfile.go`, `internal/parts/jobfile_test.go`, `internal/controller/apply.go`, `internal/controller/apply_test.go`, `cmd/aimux/cmd/setup_apply_live_test.go` (build tag `launchdlive`)
-- Modify: `cmd/aimux/cmd/setup.go` (`--apply`, `--yes`), `internal/mcpproxy/launchd.go` (the plist writer takes arguments and an environment), docs
+- Modify: `cmd/aimux/cmd/setup.go` (`--apply`, `--yes`), `internal/mcpproxy/launchd.go` (a checked install that takes arguments), docs
 
 **Interfaces:**
 - Produces:
 
 ```go
-// JobFile is the launchd job for service running program with the settings' arguments. keep is what an existing
-// file holds that the generator does not decide: its environment variables. Nothing else is carried over.
-func JobFile(service Service, program string, args []string, keep Kept) []byte
-func ReadKept(existing []byte) (Kept, error)
+// Owned splits a job file into what aimux decides and what it leaves alone.
+// It fails on a file it cannot split safely, naming why.
+func Owned(existing []byte, service Service) (program string, owned, other []string, err error)
 
-// ApplyParts makes each managed service's job match. With Check it only reports.
-func ApplyParts(home string, s parts.Settings, opts ApplyOptions) ([]JobChange, error)
+// WithArgs is existing with its owned arguments replaced, and every other byte as it was.
+func WithArgs(existing []byte, service Service, owned []string) ([]byte, error)
+
+// NewJobFile is the job for a service that has none yet.
+func NewJobFile(service Service, program string, args []string, home string) []byte
+
+// PlanParts says what would change. ApplyParts runs one plan; check and apply share the planner.
+func PlanParts(home string, s parts.Settings) ([]JobChange, error)
+func ApplyParts(home string, plan []JobChange, opts ApplyOptions) error
 type JobChange struct {
-	Service string
-	Action  string   // "none", "write", "write and restart", "start", "stop"
-	Was, Now []string // the arguments before and after
-	Adopted bool     // the file was not one aimux wrote; the old one is kept as <label>.plist.before-aimux
+	Service  string
+	Action   string   // "none", "adopt" (record it, no restart), "change arguments", "start", "stop"
+	Was, Now []string // the owned arguments before and after
+	Restarts bool
 }
 ```
 
-- An apply that changes a running job goes through `UpgradeServices`' restart: reload, wait for the service's health answer, and on failure put back the previous job file and reload again.
-- A job file aimux wrote carries a comment line saying so; that line is how `Adopted` is decided.
-- [ ] **Step 1: Write the failing tests.** `TestJobFile_*`: the model proxy's file for each settings combination, compared with fixtures; the collector's and the MCP proxy's equal what is installed today apart from the marker line. `TestApplyParts_Check`: reports and writes nothing. `TestApplyParts_NothingStated`: zero value, no change. `TestApplyParts_RollsBackTheJobFile`: a health probe that never answers. `TestSetupApplyLive_AgainstLaunchd`: a job of the test's own, arguments changed, restarted, rolled back.
-- [ ] **Step 2: Implement.**
-- [ ] **Step 3: The owner runs it:** `aimux setup --check`, then `aimux setup --apply`, on his stable model proxy. Expected: one change, "model proxy: adopted", the same arguments as today, a restart, status ok.
+- What aimux has taken under management is recorded outside the job file, in `~/.aimux/services/<id>/job.json`: the hash of the file as aimux last left it, and the path of the copy kept from before. A file that no longer matches its hash was edited by hand; the plan says so and stops for that service.
+- `ApplyParts` takes the locks `aimux upgrade` takes, and plans again under them: if the settings or a job file changed since the plan was shown, it stops and shows the new plan.
+- A change of arguments is: write the new file beside the old one, reload the job, wait for the service's health answer, and on failure put the old file back and reload again. It starts from `mcpproxy.Agent.InstallChecked`, not from `UpgradeServices`.
+- The MCP proxy's enable and disable are not a job start and stop: its installer also rewrites Claude Code's server entries and hooks, and knows how to put them back. For that part the plan's action is to run that installer or its uninstall.
+
+- [ ] **Step 1: Write the failing tests.** `TestOwned_*` and `TestWithArgs_*` from fixtures of the three job files as they are today, plus one with a custom port and `--codex-command`, one with a `Program` key (refused), one with unknown keys (kept). `TestPlanParts_NothingStated` and `TestPlanParts_OnlyTheNamedPart`: zero actions for a part the file does not name. `TestPlanParts_AdoptCostsNoRestart`. `TestApplyParts_AnArgumentThatBreaksTheServiceIsPutBack`: same program, a bad argument, the service never answers; the old file is back and the service runs. `TestApplyParts_StopsWhenThePlanIsStale`. `TestSetupApplyLive_AgainstLaunchd`: all of that against the real launchd on a job of the test's own.
+- [ ] **Step 2: Implement.** Run the full suite and the tagged live test.
+- [ ] **Step 3: The owner runs it on the stable model proxy, between turns:** add `parts: {inference-proxy: {enabled: true}}` to the file, `aimux setup --check`, then `aimux setup --apply`. Expected: one action, "model proxy: adopt", no restart, and zero actions for the MCP proxy and the collector. Then one Codex turn, to see nothing changed.
 - [ ] **Step 4: Full suite, docs, commit, pull request.**
 
 ### Task 4: `aimux engine` and `aimux enable`
@@ -167,9 +181,9 @@ type JobChange struct {
 - Modify: `internal/controller/apply.go`, `internal/e2e/` (the new commands), docs, README
 
 **Interfaces:**
-- Produces: `aimux engine list` (each engine of the inference proxy, on or off, with what the running proxy's `/healthz` says beside it); `aimux engine add anthropic`; `aimux engine add <name>=<address>`; `aimux engine remove <name>`; `aimux enable <part>`; `aimux disable <part>`. Each edits the file with `parts.Set`, prints what `--apply` would do, and applies after a yes (`--yes` to skip the question, `--no-apply` to only edit). `--json` on all.
+- Produces: `aimux engine list` (each engine of the inference proxy, on or off, with what the running proxy's `/healthz` says beside it); `aimux engine add anthropic`; `aimux engine add <name>=<address>`; `aimux engine remove <name>` (refused for `codex`, before the file is touched); `aimux enable <part>`; `aimux disable <part>`. Each edits the file with `parts.Set`, prints what `--apply` would do, and applies after a yes (`--yes` to skip the question, `--no-apply` to only edit). `--json` on all.
 - `aimux engine add <name>=<address>` checks that the secret-store entry `<name>-key` exists, without reading it, and says how to create it when it does not.
-- [ ] **Step 1: Write the failing tests**, the e2e ones included: add, list, remove, each with `--no-apply` against a temp home; a bad name and a bad address refused before the file is touched; `disable inference-proxy` stops the job and leaves the file saying so.
+- [ ] **Step 1: Write the failing tests**, the e2e ones included: add, list, remove, each with `--no-apply` against a temp home; a bad name and a bad address refused before the file is touched; `disable inference-proxy` stops the job and leaves the file saying so; `enable mcp-proxy` and `disable mcp-proxy` run the MCP proxy's own install and uninstall, and a tool answers through the proxy after one and directly after the other.
 - [ ] **Step 2: Implement. Step 3: The owner runs** `aimux engine add anthropic` on his machine. Expected: the stable proxy restarts with `--anthropic`, and `aimux model proxy env` now succeeds against it. This is also the last step of stage 3.
 - [ ] **Step 4: Full suite, docs, commit, pull request.**
 
@@ -179,7 +193,7 @@ type JobChange struct {
 - Modify: `cmd/aimux/cmd/setup.go`, `cmd/aimux/cmd/setup_test.go`, docs
 
 - `aimux setup` on a terminal opens with the list of parts, on or off, one line each, and "Turn on:" taking numbers. What it does today (the sandbox, tools, router, browser and gateway checks) runs for the parts that are on, under the part it belongs to. Without a terminal, and with `--json`, it behaves as today plus a `parts` list; the schema version goes up by one.
-- Parts that are listed and not built yet (schedules, evals) are shown as "not available yet" and cannot be chosen.
+- Parts that are listed and not built yet (schedules, evals) are shown as "not available yet" and cannot be chosen. The tool gateway is shown as managed by Wingman and cannot be chosen either.
 - [ ] **Step 1: Write the failing tests** against a scripted terminal: the list, choosing two, a wrong number, an empty answer, `--json`.
 - [ ] **Step 2: Implement. Step 3: Full suite, docs, commit, pull request.**
 
@@ -188,21 +202,27 @@ type JobChange struct {
 **Files:**
 - Modify: `cmd/aimux/cmd/model_proxy_env.go`, `internal/modelproxy/engines.go` (`SessionEnv`), tests, docs, the tracker
 
-- `aimux model proxy env --codex [model]` prints what the owner's `claude-codex` function sets today: the proxy's address, the key as the API key, and the model pinned to `codex:<model>` (default `gpt-6.2-sol`). It needs no `--anthropic` on the proxy. `--off` undoes both forms.
+- `aimux model proxy env --codex [model]` prints what the owner's `claude-codex` function sets today: the proxy's address, the key as the API key, and the model pinned to `codex:<model>` (default `gpt-6.2-sol`). It needs no `--anthropic` on the proxy, and it still asks the listener to prove it holds the key: `CheckSessionProxy` is split so the proof stands alone and the engine check is separate. `--off` undoes both forms: the base URL, the API key variable when it holds the proxy key, and the pinned model.
 - Both forms also print the collector's telemetry variables when the collector answers, so a session started this way is in the collector's totals.
-- [ ] **Step 1: Tests, implement.**
+- [ ] **Step 1: Tests, implement.** The tests include one shell going Codex-only, then both engines, then off, with no variable left holding the proxy key at the end; values with quotes in them; and the collector not answering.
 - [ ] **Step 2: The owner replaces the body of `claude-codex`** with `lines="$(aimux model proxy env --codex "$@")" && eval "$lines"`, keeping his HUD lines. aimux does not edit his shell file.
-- [ ] **Step 3: Close the stage.** After a day of use: every `aimux.side` line in the stable ledger has a session (`jq` over `~/.aimux/ledger/model-proxy.jsonl`); `aimux setup --check` reports nothing to change; the model proxy's job file carries aimux's marker. Mark stage 2 done in the tracker.
+- [ ] **Step 3: Close the stage.** Start one session through the entry line that makes a subagent call, and find its new line in the stable ledger with `aimux.side` set and the session's id: a new line for a call made on purpose, not the absence of bad lines. Check the collector received that session. `aimux setup --check` reports nothing to change, and `~/.aimux/services/model-proxy/job.json` exists. Mark stage 2 done in the tracker.
 
 ## Decisions for the owner
 
 | # | Decision | Recommended | The other way |
 |---|---|---|---|
 | 1 | How an engine is turned on | `aimux engine add anthropic`, `aimux engine add enmaas=<address>` | A flag on `aimux enable inference-proxy`; fewer commands, harder to read back |
-| 2 | What the first apply does with the job file that exists | Keeps its environment variables as they are, replaces the rest, keeps the old file beside it | Writes a minimal environment; cleaner, and likely to break `codex-lean` on the service's PATH |
+| 2 | What aimux does with a job file that exists | Changes only the program and the arguments that come from the settings; keeps everything else; refuses a file it cannot split | Rewrites the whole file from the registry; one known shape, and it would drop anything set by hand (a port, `--codex-command`, the service's PATH) |
 | 3 | Who owns the shell function | The owner keeps `claude-codex`; its body becomes one line that calls aimux | aimux installs its own shell integration; one more thing that edits `~/.zshrc` |
 
+## Where a second opinion changed this plan
+
+Codex (gpt-6.2-astra) reviewed the first draft. It agreed with decisions 1 and 3 and disagreed with 2, which is now its recommendation. From its findings the plan took: a roll-back path of its own for a change of arguments, since `aimux upgrade` has none when the program is already current; taking a job under management without a restart; a part that is not named staying unmanaged; editing the file's text and not re-encoding it; ports in the registry as defaults only; Codex as built in; the MCP proxy's enable and disable going through its installer; and a close that needs a new ledger line for a call made on purpose.
+
 ## Not in this stage
+
+- `doctor` and the installers reading the registry. They keep their own lists until a change touches them.
 
 - A daemon, and systemd job files. The registry is written so a second generator can be added.
 - The tool gateway's job, and merging the two processes behind the MCP proxy.
