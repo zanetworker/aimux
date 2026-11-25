@@ -120,6 +120,16 @@ func (env statusEnv) readModelStatus(ctx context.Context, row *controller.Servic
 	}
 	row.Build, row.StartedAt = live.Version, statusTime(live.StartedAt)
 	row.LastActivity, row.ActivityNote = live.LastOKAt, "turn"
+	// The proxy answers the same with a ledger that loses lines; only the record is incomplete.
+	switch {
+	case live.LedgerOff:
+		row.Attention = append(row.Attention, controller.Attention{Problem: "the ledger is off", Fix: "aimux model proxy status"})
+	case live.LedgerFailed > 0:
+		row.Attention = append(row.Attention, controller.Attention{
+			Problem: plural(int(live.LedgerFailed), "ledger line was not written", "ledger lines were not written"), // #nosec G115 -- a small count
+			Fix:     "aimux model proxy status",
+		})
+	}
 	return nil
 }
 

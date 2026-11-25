@@ -1,6 +1,6 @@
 # Ledger identity contract
 
-**What exists today:** in `internal/ledger`, the line type (schema `aimux.ledger/1`), the counting rule, a writer (`OpenWriter`: one file per writer, numbered lines, failed writes counted) and a reader (`ReadDir`: every `*.jsonl` file in the folder, lines of another schema skipped and counted), with tests. **Planned, not built:** the writers in each service and the assignment of ids at run time. This document is the contract those will follow.
+**What exists today:** in `internal/ledger`, the line type (schema `aimux.ledger/1`), the counting rule, a writer (`OpenWriter`: one file per writer, numbered lines, failed writes counted) and a reader (`ReadDir`: every `*.jsonl` file in the folder, lines of another schema skipped and counted), with tests. The model proxy writes a `model_call` line per request that reached its engine, with the session, a turn number and a call id it assigns as the request arrives (`internal/modelproxy/ledgerline.go`, `turns.go`). **Planned, not built:** the other writers (the collector for hooks, the MCP proxy, the tool gateway), and the run id. This document is the contract those will follow.
 
 The ledger is a folder of JSON lines files, one file per writer. This page says which ids each line carries, where each writer gets them, and the rule a reader uses so every action is counted once. The code for the rule is `ledger.Count` in `internal/ledger`.
 

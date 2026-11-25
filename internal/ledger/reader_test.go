@@ -110,3 +110,31 @@ func TestReadDir_ReadsTheLiteralFolder(t *testing.T) {
 		t.Fatal("reading a file as the ledger folder gave no error")
 	}
 }
+
+// A writer reads only the end of its own file at start, however long the file is.
+func TestReadTail_ReadsTheLastWholeLinesOfOneFile(t *testing.T) {
+	dir := t.TempDir()
+	w := mustOpen(t, dir, "model-proxy")
+	for range 200 {
+		w.Write(Line{Kind: KindModelCall, Session: "s1", Turn: "1"})
+	}
+	_ = w.Close()
+	other := mustOpen(t, dir, "collector")
+	other.Write(Line{Kind: KindToolCall, Session: "s1"})
+	_ = other.Close()
+
+	all, _, err := ReadTail(dir, "model-proxy", 1<<20)
+	if err != nil || len(all) != 200 {
+		t.Fatalf("a limit above the file's size: %d lines, %v; want all 200", len(all), err)
+	}
+	tail, report, err := ReadTail(dir, "model-proxy", 2000)
+	if err != nil || len(tail) == 0 || len(tail) >= 200 || report.Torn != 0 {
+		t.Fatalf("a 2000-byte tail: %d lines, report %+v, %v; want some whole lines and none torn", len(tail), report, err)
+	}
+	if last := tail[len(tail)-1]; last.Seq != 200 || last.Writer != "model-proxy" || tail[0].Seq != 200-uint64(len(tail))+1 {
+		t.Fatalf("the tail is not the file's last lines in order: first %d, last %d", tail[0].Seq, last.Seq)
+	}
+	if none, _, err := ReadTail(dir, "nobody", 2000); err != nil || len(none) != 0 {
+		t.Fatalf("a writer with no file: %d lines, %v", len(none), err)
+	}
+}

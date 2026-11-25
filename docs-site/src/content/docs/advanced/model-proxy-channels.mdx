@@ -27,7 +27,28 @@ It prints the proxy's state and uptime, whether its Codex app-server is running,
 
 The command exits non-zero when the proxy is degraded or not running, so a monitor can act on the exit code. The proxy is degraded when its most recent turn failed, or its most recent rate-limit check failed; a later success clears it. A request Claude Code malformed is not counted, and neither is a turn you interrupted.
 
-The same report is `GET /health` on the proxy, as JSON: 200 when healthy, 503 when degraded. `GET /health` requires the proxy key, like every route but one. `GET /healthz` is that one exception: it needs no key and always answers 200 with less: the service name, `ok` or `degraded`, the build, the start time and the last successful turn, without error text or counts. `aimux status` reads `/healthz`.
+The same report is `GET /health` on the proxy, as JSON: 200 when healthy, 503 when degraded. `GET /health` requires the proxy key, like every route but one. `GET /healthz` is that one exception: it needs no key and always answers 200 with less: the service name, `ok` or `degraded`, the build, the start time and the last successful turn and the ledger's line counts, without error text or request counts. `aimux status` reads `/healthz`.
+
+## The ledger
+
+Besides its request history, the proxy writes one line per model call to `~/.aimux/ledger/model-proxy.jsonl` (a proxy on another port writes `model-proxy-<port>.jsonl`, so the dev listener has its own file). The folder and the files are readable by you only.
+
+A line says how a call went and never what it said. It holds the session id, a turn number, an id for the call, the model the client asked for and the model that answered, the engine, token counts, time to first byte, duration and the outcome. It holds no prompt, answer, tool argument or path.
+
+| Field | Meaning |
+|---|---|
+| `session` | The harness's session id, in full. Taken from the request's metadata, or from the `X-Claude-Code-Session-Id` header |
+| `turn` | The user request this call was made for, counted from 1 per session. Every model call made for one request, a subagent's included, carries the same number |
+| `aimux.side`, `aimux.agent` | The call came from a subagent (with its id) or carried no session in its metadata |
+| `gen_ai.request.model`, `gen_ai.response.model` | The model named by the client, and the one that answered. A Claude model name is answered by the default Codex model, and both are kept |
+| `gen_ai.usage.input_tokens` | The whole prompt. The part read from a cache is included, and also given as `aimux.usage.cache_read_input_tokens` |
+| `aimux.outcome` | `ok`, or the same word the request history uses for a failure |
+
+A request the proxy rejects before Codex sees it is not a model call and writes no line.
+
+Writing the line never changes the answer: it happens after the response, and a write that fails is counted, not reported to the client. `aimux model proxy status` shows a `Ledger` row (`latest line 1840`, or `latest line 1840, 3 not written`, or `off` when the file could not be opened at start), and `aimux status` lists a lost line or a ledger that is off under what needs attention. The keyed `GET /health` carries them as a `ledger` object (`seq`, `failed`, `off`), and the keyless `GET /healthz` as `ledger_seq`, `ledger_failed` and `ledger_off`.
+
+The request history and `aimux model proxy stats` are unchanged.
 
 ## Speed
 

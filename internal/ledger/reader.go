@@ -83,3 +83,36 @@ func readFile(file io.Reader, lines []Line, report *ReadReport) ([]Line, error) 
 		}
 	}
 }
+
+// ReadTail reads the lines in the last limit bytes of one writer's file, dir/name.jsonl. It is for a writer that
+// only needs its recent lines at start and must not take longer as its file grows. A missing file is no lines.
+func ReadTail(dir, name string, limit int64) ([]Line, ReadReport, error) {
+	var report ReadReport
+	file, err := os.Open(filepath.Join(dir, name+".jsonl")) // #nosec G304 -- a file in the owner's ledger folder
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, report, nil
+	}
+	if err != nil {
+		return nil, report, err
+	}
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, report, err
+	}
+	report.Files = 1
+	start := max(info.Size()-limit, 0)
+	return readTailLines(file, start, info.Size(), &report)
+}
+
+// readTailLines reads whole lines from offset start, dropping the first when start is inside the file.
+func readTailLines(file *os.File, start, size int64, report *ReadReport) ([]Line, ReadReport, error) {
+	reader := bufio.NewReader(io.NewSectionReader(file, start, size-start))
+	if start > 0 {
+		if _, err := reader.ReadBytes('\n'); err != nil {
+			return nil, *report, nil
+		}
+	}
+	lines, err := readFile(reader, nil, report)
+	return lines, *report, err
+}

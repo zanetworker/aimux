@@ -173,15 +173,8 @@ func mapRequest(req messageRequest) (TurnRequest, error) {
 		}
 	}
 	if explicit {
-		var metadata struct {
-			UserID string `json:"user_id"`
-		}
-		var user struct {
-			SessionID string `json:"session_id"`
-		}
-		if json.Unmarshal(req.Metadata, &metadata) == nil &&
-			json.Unmarshal([]byte(metadata.UserID), &user) == nil && user.SessionID != "" {
-			turn.session = newSessionInput(user.SessionID, turn, len(req.Messages))
+		if id := metadataSessionID(req.Metadata); id != "" {
+			turn.session = newSessionInput(id, turn, len(req.Messages))
 		}
 	}
 	trailingSystem := lastIdx >= 0 && lastIdx < len(req.Messages)-1
@@ -331,4 +324,18 @@ func toolOutput(raw json.RawMessage, isError bool) (any, error) {
 		}
 	}
 	return parts, nil
+}
+
+// metadataSessionID is the session id Claude Code puts in a request's metadata, or "" when there is none.
+func metadataSessionID(raw json.RawMessage) string {
+	var metadata struct {
+		UserID string `json:"user_id"`
+	}
+	var user struct {
+		SessionID string `json:"session_id"`
+	}
+	if json.Unmarshal(raw, &metadata) != nil || json.Unmarshal([]byte(metadata.UserID), &user) != nil {
+		return ""
+	}
+	return user.SessionID
 }

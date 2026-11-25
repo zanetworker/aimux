@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/zanetworker/aimux/internal/ledger"
 	"strings"
 	"time"
 )
@@ -18,7 +20,12 @@ import (
 // HandlerOption configures the handler beyond its backend and key.
 type HandlerOption func(*handlerConfig)
 
-type handlerConfig struct{ requests *RequestLog }
+type handlerConfig struct {
+	requests  *RequestLog
+	ledger    *ledger.Writer
+	ledgerOff bool
+	turns     *turns
+}
 
 // WithRequestLog records one line per answered request, for `aimux model proxy stats`.
 func WithRequestLog(log *RequestLog) HandlerOption {
@@ -26,7 +33,7 @@ func WithRequestLog(log *RequestLog) HandlerOption {
 }
 
 func NewHandler(backend Backend, key string, options ...HandlerOption) http.Handler {
-	config := handlerConfig{}
+	config := handlerConfig{turns: &turns{}}
 	for _, option := range options {
 		option(&config)
 	}
@@ -37,6 +44,8 @@ func NewHandler(backend Backend, key string, options ...HandlerOption) http.Hand
 	if hasHealth {
 		mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 			health := reporter.health()
+			stats := config.ledger.Stats()
+			health.Ledger = LedgerHealth{Seq: stats.Seq, Failed: stats.Failed, Off: config.ledgerOff}
 			status := http.StatusOK
 			if health.Status != "ok" {
 				status = http.StatusServiceUnavailable
@@ -51,13 +60,16 @@ func NewHandler(backend Backend, key string, options ...HandlerOption) http.Hand
 		}
 	})
 	mux.HandleFunc("POST /v1/messages", func(w http.ResponseWriter, r *http.Request) {
-		serveMessage(w, r, backend, config.requests)
+		serveMessage(w, r, backend, &config)
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// GET /healthz is the one keyless answer, so `aimux status` never has to hand the key to an unknown
 		// listener. It always answers 200 and carries no error text; the keyed /health has the detail.
 		if hasHealth && r.Method == http.MethodGet && r.URL.Path == "/healthz" {
-			_ = writeJSON(w, http.StatusOK, liveness(reporter.health()))
+			live := liveness(reporter.health())
+			stats := config.ledger.Stats()
+			live.LedgerSeq, live.LedgerFailed, live.LedgerOff = stats.Seq, stats.Failed, config.ledgerOff
+			_ = writeJSON(w, http.StatusOK, live)
 			return
 		}
 		if !validKey(r, key) {
@@ -122,7 +134,10 @@ func readRequest(w http.ResponseWriter, r *http.Request) (messageRequest, int, b
 	return request, len(body), true
 }
 
-func serveMessage(w http.ResponseWriter, r *http.Request, backend Backend, requests *RequestLog) {
+func serveMessage(w http.ResponseWriter, r *http.Request, backend Backend, config *handlerConfig) {
+	requests := config.requests
+	// call is the ledger line for this request, set once the request is known to be a model call.
+	var call *ledger.Line
 	var usage Usage
 	var session *sessionInput
 	var failure, model, effort string
@@ -130,7 +145,7 @@ func serveMessage(w http.ResponseWriter, r *http.Request, backend Backend, reque
 	logger, hasLogger := backend.(interface {
 		logMessage(string, Usage, time.Duration)
 	})
-	if hasLogger || requests != nil {
+	if hasLogger || requests != nil || config.ledger != nil {
 		timing := &messageTiming{ResponseWriter: w, started: time.Now(), firstByte: -time.Millisecond}
 		w = timing
 		defer func() {
@@ -146,6 +161,10 @@ func serveMessage(w http.ResponseWriter, r *http.Request, backend Backend, reque
 				Status: timing.status, TTFB: timing.firstByte, Duration: time.Since(timing.started),
 				Usage: usage, Error: failure,
 			})
+			if call != nil {
+				finishModelCall(call, timing.started, timing.firstByte, usage, failure)
+				config.ledger.Write(*call)
+			}
 		}()
 	}
 	request, _, ok := readRequest(w, r)
@@ -159,6 +178,9 @@ func serveMessage(w http.ResponseWriter, r *http.Request, backend Backend, reque
 		return
 	}
 	outcome, session = "stateless", turn.session
+	if config.ledger != nil {
+		call = startModelCall(config.turns, r, request, turn)
+	}
 	model, effort = request.Model, turn.Effort
 	if model == "" {
 		model = "codex:" + turn.Model
