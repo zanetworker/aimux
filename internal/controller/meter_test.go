@@ -212,3 +212,19 @@ func TestMeter_CountsTheFilesItRead(t *testing.T) {
 		t.Fatalf("report %+v; want one file read and no rows in the window", got)
 	}
 }
+
+func TestMeter_CallsWithNoTokenFiguresAreSaid(t *testing.T) {
+	at := time.Now()
+	dir := meterLedger(t,
+		ledger.Line{Kind: ledger.KindModelCall, At: at, Session: "s1", ResponseModel: "claude-sonnet-5-5", InputTokens: 100, OutputTokens: 5, Outcome: ledger.OutcomeOK},
+		ledger.Line{Kind: ledger.KindModelCall, At: at, Session: "s1", UsageUnknown: true, Outcome: "upstream_error"},
+		ledger.Line{Kind: ledger.KindSwitch, At: at, Session: "s1", FromEngine: "anthropic", ToEngine: "codex"},
+	)
+	report, err := Meter(dir, MeterOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.NoUsage != 1 || report.Total.Requests != 2 || report.Total.InputTokens != 100 || report.Total.Failed != 1 {
+		t.Fatalf("report = %+v; want one call without figures among two requests, and the switch line counted as neither", report)
+	}
+}

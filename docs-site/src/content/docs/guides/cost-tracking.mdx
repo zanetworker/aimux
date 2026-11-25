@@ -64,7 +64,7 @@ total                                           217    3       ~42.1k  ~1.4M   ~
 What it counts and what it does not:
 
 - It counts model calls that passed the model proxy. A session that talks to its provider directly is not in the ledger, so it is not here. The costs on agent cards and in the dashboard, described above, come from each harness's own transcript and are a separate count.
-- Under the table it says what the ledger could not show: calls with no session (counted in no row and not in the total), lines written by another version of aimux, lines that are not whole, and lines missing from a writer. When any of the last three applies it adds `totals are incomplete`.
+- Under the table it says what the ledger could not show: calls whose answer carried no token figures (counted as requests, their tokens in no sum; `no_usage` in the JSON), calls with no session (counted in no row and not in the total), lines written by another version of aimux, lines that are not whole, and lines missing from a writer. When any of the last three applies it adds `totals are incomplete`.
 - With no ledger yet it says so and names the command that makes the model proxy write one.
 
 `--json` prints the same report with whole session ids. Each row has `asked`, the names the client used, and `models`, the models that answered; with `--by model` the row's key is the served model and `models` is left out. `files` is how many ledger files were read.

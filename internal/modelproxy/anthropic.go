@@ -22,6 +22,7 @@ const (
 	forwardUnreachable = "upstream_unreachable" // no answer came back
 	forwardClientGone  = "client_gone"
 	forwardCutShort    = "stream_cut_short" // the answer started and did not finish
+	forwardRefused     = "refused"          // not sent: the address held the proxy key
 )
 
 // anthropicEngine forwards a request to its upstream unchanged and reports how it went. The caller's credential
@@ -68,6 +69,11 @@ func newAnthropicEngine(upstream, proxyKey string) (*anthropicEngine, error) {
 // received. One header is narrowed: the upstream is asked for gzip or for no compression, never an encoding the
 // usage reader cannot follow.
 func (e *anthropicEngine) forward(w http.ResponseWriter, r *http.Request, requestPath string, body []byte) forwardResult {
+	if e.holdsProxyKey(requestPath) || e.holdsProxyKey(r.URL.RawQuery) {
+		// Whatever put it there, the key does not leave in an address.
+		writeError(w, http.StatusBadRequest, "invalid_request_error", keyInAddress)
+		return forwardResult{Status: http.StatusBadRequest, Outcome: forwardRefused}
+	}
 	target := *e.upstream
 	target.Path, target.RawPath, target.RawQuery = upstreamPath(requestPath), "", r.URL.RawQuery
 	if plain, err := url.PathUnescape(target.Path); err == nil {
@@ -118,7 +124,8 @@ func (e *anthropicEngine) forward(w http.ResponseWriter, r *http.Request, reques
 	}
 	w.WriteHeader(resp.StatusCode)
 
-	flusher, _ := w.(http.Flusher)
+	// Through the controller, so a writer that wraps another (to time the answer, say) still flushes.
+	flusher := http.NewResponseController(w)
 	buf := make([]byte, 32<<10)
 	for {
 		n, readErr := resp.Body.Read(buf)
@@ -128,9 +135,7 @@ func (e *anthropicEngine) forward(w http.ResponseWriter, r *http.Request, reques
 				result.Outcome = forwardClientGone
 				break
 			}
-			if flusher != nil {
-				flusher.Flush()
-			}
+			_ = flusher.Flush()
 		}
 		if readErr == nil {
 			continue
@@ -167,7 +172,7 @@ func (e *anthropicEngine) outgoingHeader(from http.Header) http.Header {
 	to.Del("X-Aimux-Key")
 	if e.proxyKey != "" {
 		for name := range to {
-			keepValues(to, name, func(value string) bool { return !strings.Contains(value, e.proxyKey) })
+			keepValues(to, name, func(value string) bool { return !e.holdsProxyKey(value) })
 		}
 	}
 	encoding := "identity"
@@ -217,6 +222,21 @@ func upstreamPath(requestPath string) string {
 	return "/" + requestPath
 }
 
+const keyInAddress = "the request's address holds the proxy key, which is not sent on"
+
+// holdsProxyKey reports whether part of an address, or a header value, holds the proxy key, as written or behind
+// percent escapes.
+func (e *anthropicEngine) holdsProxyKey(part string) bool {
+	if e.proxyKey == "" {
+		return false
+	}
+	if strings.Contains(part, e.proxyKey) {
+		return true
+	}
+	plain, err := url.QueryUnescape(part)
+	return err == nil && strings.Contains(plain, e.proxyKey)
+}
+
 var hopByHopHeaders = map[string]bool{
 	"Connection": true, "Keep-Alive": true, "Proxy-Authenticate": true, "Proxy-Authorization": true,
 	"Proxy-Connection": true, "Te": true, "Trailer": true, "Transfer-Encoding": true, "Upgrade": true,
@@ -242,11 +262,7 @@ func hopByHop(name string, all http.Header) bool {
 // dropConnection closes the client's connection without ending the response properly, so a client that was sent
 // part of an answer sees it break and does not take the part for the whole.
 func dropConnection(w http.ResponseWriter) {
-	hijacker, ok := w.(http.Hijacker)
-	if !ok {
-		return
-	}
-	if conn, _, err := hijacker.Hijack(); err == nil {
+	if conn, _, err := http.NewResponseController(w).Hijack(); err == nil {
 		_ = conn.Close()
 	}
 }

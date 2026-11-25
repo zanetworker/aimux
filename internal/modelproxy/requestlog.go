@@ -82,7 +82,8 @@ func (l *RequestLog) Record(record Record) {
 		At: at.UTC().Format(time.RFC3339), Outcome: bounded(record.Outcome), Detail: bounded(record.Detail), Session: bounded(record.Session),
 		Model: bounded(record.Model), Effort: bounded(record.Effort), Status: record.Status,
 		TTFBms: record.TTFB.Milliseconds(), DurationMs: record.Duration.Milliseconds(),
-		InputTokens: record.Usage.InputTokens, CachedInputTokens: record.Usage.CacheReadInputTokens,
+		// Input written to a cache is input that was not read from one.
+		InputTokens: record.Usage.InputTokens + record.Usage.CacheCreationInputTokens, CachedInputTokens: record.Usage.CacheReadInputTokens,
 		OutputTokens: record.Usage.OutputTokens, Estimated: record.Usage.estimated, Error: bounded(record.Error),
 	})
 	if err != nil {

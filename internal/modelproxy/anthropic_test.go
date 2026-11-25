@@ -157,6 +157,7 @@ func TestAnthropicEngine_KeyHeaders(t *testing.T) {
 		"the proxy key as a bearer token is removed":     {"Authorization", "Bearer " + testProxyKey, ""},
 		"a value with the key anywhere in it is removed": {"Referer", "http://127.0.0.1:7385/k/" + testProxyKey + "/v1/messages", ""},
 		"a cookie holding the key is removed":            {"Cookie", "k=" + testProxyKey, ""},
+		"an escaped key in an address is removed":        {"Referer", "http://127.0.0.1:7385/k/" + strings.ReplaceAll(testProxyKey, "-", "%2D") + "/v1/messages", ""},
 		"a client that takes no compression gets none":   {"Accept-Encoding", "identity", "identity"},
 		"a client that refuses gzip is not sent it":      {"Accept-Encoding", "br, gzip;q=0", "identity"},
 		"gzip with a weight is still gzip":               {"Accept-Encoding", "br;q=1.0, GZIP;q=0.5", "gzip"},

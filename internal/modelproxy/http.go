@@ -3,7 +3,6 @@ package modelproxy
 import (
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,6 +24,7 @@ type handlerConfig struct {
 	ledger    *ledger.Writer
 	ledgerOff bool
 	turns     *turns
+	anthropic *anthropicEngine // nil: every request is answered by Codex, as before there was a second engine
 }
 
 // WithRequestLog records one line per answered request, for `aimux model proxy stats`.
@@ -36,6 +36,9 @@ func NewHandler(backend Backend, key string, options ...HandlerOption) http.Hand
 	config := handlerConfig{turns: &turns{}}
 	for _, option := range options {
 		option(&config)
+	}
+	if config.anthropic != nil {
+		config.anthropic.proxyKey = key
 	}
 	mux := http.NewServeMux()
 	reporter, hasHealth := backend.(interface{ health() Health })
@@ -72,27 +75,21 @@ func NewHandler(backend Backend, key string, options ...HandlerOption) http.Hand
 			_ = writeJSON(w, http.StatusOK, live)
 			return
 		}
-		if !validKey(r, key) {
+		carried, path := readCredentials(r, key)
+		if carried.viaPath {
+			// From here on nothing sees the key: not the routes, not a log line, not the other engine.
+			r = withoutKeyPrefix(r, path)
+		}
+		if config.anthropic != nil {
+			serveEngines(w, r, carried, path, mux, &config)
+			return
+		}
+		if !carried.proxyKey || carried.badPath {
 			writeError(w, http.StatusUnauthorized, "authentication_error", "invalid or missing proxy key")
 			return
 		}
 		mux.ServeHTTP(w, r)
 	})
-}
-
-func validKey(r *http.Request, key string) bool {
-	if key == "" {
-		return false
-	}
-	got := r.Header.Get("x-api-key")
-	if got == "" {
-		bearer, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if !ok {
-			return false
-		}
-		got = bearer
-	}
-	return subtle.ConstantTimeCompare([]byte(got), []byte(key)) == 1
 }
 
 func listModels(w http.ResponseWriter, _ *http.Request) {
@@ -115,15 +112,28 @@ func listModels(w http.ResponseWriter, _ *http.Request) {
 // what Claude Code sends: Anthropic's own Messages API limit is 32 MB, images included.
 var maxRequestBytes int64 = 64 << 20
 
-func readRequest(w http.ResponseWriter, r *http.Request) (messageRequest, int, bool) {
-	var request messageRequest
+// readBody reads a request body up to the proxy's bound, and answers the client itself when it cannot.
+func readBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxRequestBytes))
 	var tooLarge *http.MaxBytesError
 	if errors.As(err, &tooLarge) {
 		writeError(w, http.StatusRequestEntityTooLarge, "request_too_large", fmt.Sprintf("request body is over %d bytes", maxRequestBytes))
+		return nil, false
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request_error", "the request body could not be read")
+		return nil, false
+	}
+	return body, true
+}
+
+func readRequest(w http.ResponseWriter, r *http.Request) (messageRequest, int, bool) {
+	var request messageRequest
+	body, ok := readBody(w, r)
+	if !ok {
 		return request, 0, false
 	}
-	if err != nil || !json.Valid(body) {
+	if !json.Valid(body) {
 		writeError(w, http.StatusBadRequest, "invalid_request_error", "invalid JSON request body")
 		return request, 0, false
 	}
@@ -179,7 +189,11 @@ func serveMessage(w http.ResponseWriter, r *http.Request, backend Backend, confi
 	}
 	outcome, session = "stateless", turn.session
 	if config.ledger != nil {
-		call = startModelCall(config.turns, r, request, turn)
+		var change *ledger.Line
+		call, change = startModelCall(config.turns, r, request, engineCodex, "codex:"+turn.Model, turn.Effort)
+		if change != nil {
+			config.ledger.Write(*change)
+		}
 	}
 	model, effort = request.Model, turn.Effort
 	if model == "" {
