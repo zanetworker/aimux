@@ -32,3 +32,41 @@ Agent cards and the list view show CPU%, memory, token counts, and cost. The sta
 ## Unknown Models
 
 Models not in the pricing table show `$0.00`. To add custom model pricing, submit a PR to `internal/cost/tracker.go`.
+
+## What your sessions spent: `aimux cost`
+
+`aimux cost` reads the ledger, the record the model proxy writes of every model call, and sums it.
+
+```bash
+aimux cost                      # the last 24 hours, by session
+aimux cost --by model --since 7d
+aimux cost --by day --since all
+aimux cost --session 0b61f1d5   # one session: its id, or the start of it
+```
+
+```text
+Model calls in the last 24h
+
+SESSION   ASKED AS           SERVED             CALLS  FAILED  IN      CACHED  OUT     COST
+0b61f1d5  claude-sonnet-5-5  codex:gpt-6.2-sol  212    3       41.2k   1.4M    18.1k   unpriced
+220431f5  -                  codex:gpt-6.2-sol  5      0       ~900    0       ~185    unpriced
+total                                           217    3       ~42.1k  ~1.4M   ~18.2k  unpriced
+```
+
+| Column | Meaning |
+|---|---|
+| `SERVED` | The model that answered |
+| `ASKED AS` | The names the client used when they differ from it. A Claude model name answered by another engine shows here; `-` means it got what it asked for |
+| `CALLS`, `FAILED` | Model calls, and how many did not end in an answer |
+| `IN`, `CACHED`, `OUT` | Input tokens not read from a cache, input tokens read from a cache, output tokens. A leading `~` on a row's counts means the usage of some of its calls was estimated |
+| `COST` | `unpriced`: the counts are real, prices are not applied yet |
+
+What it counts and what it does not:
+
+- It counts model calls that passed the model proxy. A session that talks to its provider directly is not in the ledger, so it is not here. The costs on agent cards and in the dashboard, described above, come from each harness's own transcript and are a separate count.
+- Under the table it says what the ledger could not show: calls with no session (counted in no row and not in the total), lines written by another version of aimux, lines that are not whole, and lines missing from a writer. When any of the last three applies it adds `totals are incomplete`.
+- With no ledger yet it says so and names the command that makes the model proxy write one.
+
+`--json` prints the same report with whole session ids. Each row has `asked`, the names the client used, and `models`, the models that answered; with `--by model` the row's key is the served model and `models` is left out. `files` is how many ledger files were read.
+
+A shortened id given to `--session` must fit one session; when it fits more, the command says so and stops. Every failure exits 1, a bad flag value included.
