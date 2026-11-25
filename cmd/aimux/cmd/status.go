@@ -18,6 +18,7 @@ import (
 	"github.com/zanetworker/aimux/internal/controller"
 	"github.com/zanetworker/aimux/internal/mcpproxy"
 	"github.com/zanetworker/aimux/internal/modelproxy"
+	"github.com/zanetworker/aimux/internal/parts"
 	"github.com/zanetworker/aimux/internal/toolgateway"
 )
 
@@ -46,8 +47,11 @@ func newStatusCmd() *cobra.Command {
 // defaultStatusEnv is where the four services are found on this machine.
 func defaultStatusEnv(home, version string, cfg config.Config) statusEnv {
 	gateway := toolgateway.ControlClient{Path: toolgateway.ControlSocketPath(home)}
+	// The model proxy is where its job starts it: the usual port, unless the job says another.
+	model := parts.MustService("model-proxy")
+	modelPort := parts.InstalledProxyPort(filepath.Join(home, "Library", "LaunchAgents", model.Label+".plist"), modelproxy.StablePort)
 	return statusEnv{
-		modelAddr:     fmt.Sprintf("127.0.0.1:%d", modelproxy.StablePort),
+		modelAddr:     fmt.Sprintf("127.0.0.1:%d", modelPort),
 		mcpAddr:       fmt.Sprintf("127.0.0.1:%d", restartPort(home, defaultPort, false)),
 		gatewayAddr:   toolgateway.ReadonlyAddr,
 		collectorAddr: fmt.Sprintf("127.0.0.1:%d", cfg.OTELReceiverPort()),

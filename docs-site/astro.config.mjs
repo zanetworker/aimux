@@ -35,6 +35,7 @@ export default defineConfig({
 						{ label: 'Chat with Sessions', slug: 'guides/chat' },
 						{ label: 'Remote Access', slug: 'guides/remote-access' },
 						{ label: 'Upgrading the Services', slug: 'guides/upgrading-services' },
+						{ label: 'Parts and Their Settings', slug: 'guides/parts' },
 						{ label: 'Troubleshooting', slug: 'guides/troubleshooting' },
 					],
 				},

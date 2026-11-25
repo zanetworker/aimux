@@ -1,0 +1,92 @@
+---
+title: Parts and Their Settings
+description: Say in one file which parts of aimux are on and how, and have aimux make the background services match.
+---
+
+aimux is made of parts: the sessions dashboard, the inference proxy, the MCP proxy, phone access, sandboxes. Some of them need a background service. The `parts:` section of `~/.aimux/config.yaml` says which parts you want on and how, and `aimux setup --apply` makes the services match. The services it manages today are the launchd jobs of the model proxy (the inference proxy part) and the MCP proxy; only the model proxy has settings beyond on and off.
+
+Nothing here is required. With no `parts:` section, aimux manages no service and each one runs as it was installed.
+
+## The section
+
+```yaml
+# ~/.aimux/config.yaml
+parts:
+  inference-proxy:
+    enabled: true
+    port: 7385
+    serves: [messages]
+    engines:
+      codex:
+        service_tier: priority
+      anthropic:
+        enabled: true
+      enmaas:
+        type: messages
+        url: https://gateway.example
+        key: {keychain: {item: enmaas-key}}
+        enabled: true
+  mcp-proxy:
+    enabled: true
+```
+
+The inference proxy has two sides. `serves` is the front: the APIs a client may speak to it, which today is the Messages API, since the client is Claude Code. `engines` is the back: who answers. Each engine has a name, which is what you type before the colon of a model name (`enmaas:claude-opus-5-5`).
+
+| Key | Under | Meaning | When left out |
+|---|---|---|---|
+| `enabled` | a part | `true`: aimux manages its service: it takes the job as it is, changes its arguments when the settings ask, and starts it when it is not loaded. `false`: meant to keep it stopped, which is not built yet | Not allowed. A part that is listed says one or the other |
+| `port` | `inference-proxy` | The port on 127.0.0.1 | What the installed job has |
+| `serves` | `inference-proxy` | The APIs a client may speak; `messages` is the only one this build knows | `[messages]` |
+| `engines` | `inference-proxy` | The engines, by name | What the installed job has |
+| `type` | an engine | The protocol the proxy speaks to it: `codex-app-server` or `messages` | Implied for `codex` and `anthropic`; required for any other name |
+| `auth` | a `messages` engine | Whose credential is sent: `caller` (the session's own login), which only `anthropic` may use, or `key` (your key for that engine), which is the only one an engine you name may use | `caller` for `anthropic`, `key` for any other |
+| `url` | a `messages` engine | Where it is; `https` unless on this machine | Required for an engine you name. `anthropic` always goes to `https://api.anthropic.com` and cannot be given another |
+| `key` | a `messages` engine with `auth: key` | Where its key is kept: `{keychain: {item: ...}}`, `{env: {name: ...}}`, `{file: {path: ...}}` or `{cmd: {argv: [...]}}`. Never the key | `{keychain: {item: <name>-key}}` |
+| `enabled` | an engine | Requests naming it are answered | On, for an engine that is listed. `codex` cannot be turned off |
+| `service_tier`, `binary` | `codex` | The tier (`priority` or `standard`) and the Codex program to run | What the installed job has |
+
+Three rules are worth knowing before you edit it:
+
+- **A part has three states.** Not listed: aimux neither starts nor stops it. `enabled: true`: aimux manages it. `enabled: false`: it should be stopped, which this build reports and does not yet do. Adding one part to the file never touches another.
+- **A setting left out means "as it is installed".** `inference-proxy: {enabled: true}` on a proxy that runs with a port you chose keeps that port. A setting you write replaces the installed one. Engines are stated together: once the file lists engines, they replace the ones the job had, and `engines:` with nothing under it means none besides Codex.
+- **No secret goes in the file.** A key is a reference to where it is kept.
+
+## See what would change
+
+```bash
+aimux setup --check
+```
+
+It reads the section, compares it with each service's job, and prints what `--apply` would do. It changes nothing. It exits 1 when something would change, so a script can test it, and it lists every problem in the section with its line when the section cannot be used.
+
+With `--json` it prints `{"schema_version": 1, "stated": ..., "changes": ..., "plan": [...]}`, each line of the plan with `part`, `service`, `action` (`none`, `adopt`, `change arguments`, `start`, `skip`), the arguments `was` and `now`, `restarts` and a `note`. A section with problems gives `{"schema_version": 1, "problems": [...]}`, and `--apply --json` gives `{"schema_version": 1, "results": [...]}`, each result a plan line with its `outcome` (`unchanged`, `adopted`, `changed`, `started`, `rolled back`, `failed`, `skipped`) and a `detail`.
+
+```text
+PART             SERVICE      WILL        DETAIL
+inference-proxy  model proxy  restart     from: model proxy serve
+                                          to:   model proxy serve --anthropic
+mcp-proxy        mcp proxy    be managed  as it runs now; no restart
+```
+
+## Make the services match
+
+```bash
+aimux setup --apply
+```
+
+It shows the same table, asks before it restarts a service (`--yes` agrees in advance; with nobody to ask and no `--yes` it refuses), and then does exactly what the table said.
+
+What it will and will not touch in a job file:
+
+- It changes only the arguments that come from the settings: the port, the Codex tier and program, and the engines. The job's environment, its log paths, when it restarts, and any other argument you added by hand stay as they are. An argument of that list which you set by hand is kept until the file states that setting; then the file wins.
+- Taking a service under management costs nothing: when its job already runs what the settings state, the file is not rewritten and the service is not restarted.
+- The job file as it was before aimux first managed it is kept in `~/.aimux/services/<service>/job.before-aimux.plist`.
+- A job file it cannot read safely is left alone, with the reason: one with a separate `Program` key, a comment, or arguments after a bare `--`.
+
+If a service does not answer after its restart, its old job file is written back and it is started from that again. The command says so and exits 1. That holds when you interrupt it while it waits: the wait ends, and the job file still goes back before the command returns. The service is asked on the port its new arguments give it, so changing the port is not mistaken for a service that did not come up.
+
+A service whose job is right and which does not answer is started.
+
+Moving the model proxy to another port moves `aimux status` and `aimux upgrade` with it: both read the port from the job. A session still has to be pointed at the new port (`aimux model proxy env --port`), and the proxy's request history and ledger are kept per port, so a new port starts new files.
+
+Turning a part off (`enabled: false`) and making a job for a service that has none are not built yet: `--check` says so for that part and `--apply` leaves it as it is.

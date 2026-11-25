@@ -77,8 +77,8 @@ func TestJobArgs_RefusesWhatItCannotSplit(t *testing.T) {
 		"an argument not a string":                   strings.Replace(model, "<string>serve</string>", "<integer>5</integer>", 1),
 		"a comment in the list":                      strings.Replace(model, "<string>serve</string>", "<!-- note --><string>serve</string>", 1),
 		"not a job file":                             "hello",
-		"a CDATA section":          strings.Replace(model, "<string>/Users/someone</string>", "<string><![CDATA[<key>ProgramArguments</key>]]></string>", 1),
-		"a carriage return inside an argument": strings.Replace(model, "<string>serve</string>", "<string>ser\rve</string>", 1),
+		"a CDATA section":                            strings.Replace(model, "<string>/Users/someone</string>", "<string><![CDATA[<key>ProgramArguments</key>]]></string>", 1),
+		"a carriage return inside an argument":       strings.Replace(model, "<string>serve</string>", "<string>ser\rve</string>", 1),
 		"a comment anywhere":                         strings.Replace(model, "<dict>", "<dict>\n\t<!-- <key>ProgramArguments</key><array><string>/old</string></array> -->", 1),
 		"the key a second time, in the environment":  strings.Replace(model, "<key>HOME</key>", "<key>ProgramArguments</key>\n\t\t<string>x</string>\n\t\t<key>HOME</key>", 1),
 		"Program spelled with a character reference": strings.Replace(model, "<key>ProgramArguments</key>", "<key>Pro&#103;ram</key>\n\t<string>/bin/x</string>\n\t<key>ProgramArguments</key>", 1),
@@ -185,5 +185,48 @@ func TestSameArgs(t *testing.T) {
 	}
 	if SameArgs(proxy, a, c) || SameArgs(proxy, a, append(slices.Clone(a), "--verbose")) || SameArgs(proxy, a, []string{"/other/aimux", "model", "proxy", "serve", "--anthropic", "--port", "7385"}) {
 		t.Error("different arguments are the same")
+	}
+}
+
+func TestProxyPort(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want int
+	}{
+		{[]string{"model", "proxy", "serve"}, 7385},
+		{[]string{"model", "proxy", "serve", "--port", "7400", "--anthropic"}, 7400},
+		{[]string{"model", "proxy", "serve", "--port=7401"}, 7401},
+		{[]string{"model", "proxy", "serve", "--port", "many"}, 7385},
+		{[]string{"model", "proxy", "serve", "--port=0x1cda"}, 7386},
+		{[]string{"model", "proxy", "serve", "--port", "99999"}, 7385},
+		{[]string{"something", "else"}, 7385},
+	} {
+		if got := ProxyPort(tc.args, 7385); got != tc.want {
+			t.Errorf("ProxyPort(%q) = %d, want %d", tc.args, got, tc.want)
+		}
+	}
+}
+
+func TestInstalledProxyPort(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "job.plist")
+	if got := InstalledProxyPort(path, 7385); got != 7385 {
+		t.Errorf("no job file: %d", got)
+	}
+	moved, err := SetJobArgs(jobFixture(t, "com.aimux.model-proxy"), []string{"/p/aimux", "model", "proxy", "serve", "--port", "7400"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, moved, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := InstalledProxyPort(path, 7385); got != 7400 {
+		t.Errorf("a job on another port: %d", got)
+	}
+	if err := os.WriteFile(path, []byte("not a job"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := InstalledProxyPort(path, 7385); got != 7385 {
+		t.Errorf("a file that is not a job: %d", got)
 	}
 }

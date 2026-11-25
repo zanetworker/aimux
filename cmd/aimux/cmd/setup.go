@@ -20,9 +20,12 @@ import (
 	"golang.org/x/term"
 
 	"github.com/zanetworker/aimux/internal/autoroute"
+	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/sandboxlaunch"
 	"github.com/zanetworker/aimux/internal/toolgateway"
 	"github.com/zanetworker/aimux/internal/toolreg"
+	"os/signal"
+	"syscall"
 )
 
 // setupSchemaVersion is the schema of `aimux setup --json` and `aimux doctor --json`.
@@ -111,13 +114,33 @@ func newSetupCmdWith(env frontEnv) *cobra.Command {
 			"Tools that need review are offered one by one, only on a terminal and never with --json: a tool is\n" +
 			"approved only after you answer yes to its diff and yes to approving it. --yes never approves tools.\n" +
 			"Ends with one line per concern (sandbox, tools, router, browser, gateway, worker: the tool gateway worker) and a Next: line per problem.\n" +
-			"Exit 0 unless a step failed.",
+			"Exit 0 unless a step failed.\n\n" +
+			"With --check or --apply it does something else: it compares the background services with the parts\n" +
+			"section of ~/.aimux/config.yaml. --check prints what would change and exits 1 when something would;\n" +
+			"--apply makes the services match, asking before a restart.",
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
+			if o.check && o.apply {
+				return errors.New("--check and --apply are two different things to ask for; give one")
+			}
+			if o.check || o.apply {
+				c.SilenceUsage = true
+				// An interrupt ends a wait; a service that did not come up still gets its job file back first.
+				ctx, stop := signal.NotifyContext(c.Context(), os.Interrupt, syscall.SIGTERM)
+				defer stop()
+				cfg, _ := config.Load(config.DefaultPath())
+				opts := setupPartsOpts{apply: o.apply, yes: o.yes, asJSON: jsonOutput}
+				if !jsonOutput && env.IsTTY != nil && env.IsTTY() {
+					opts.ask = askOn(env.In(), c.OutOrStdout())
+				}
+				return runSetupParts(ctx, filepath.Join(env.Home, ".aimux", "config.yaml"), partServices(env.Home, c.Root().Version, cfg), opts, c.OutOrStdout())
+			}
 			return runSetup(c.Context(), env, o, c.OutOrStdout(), c.ErrOrStderr())
 		},
 	}
-	cmd.Flags().BoolVar(&o.yes, "yes", false, "Run the missing setup steps without asking (never approves tools)")
+	cmd.Flags().BoolVar(&o.yes, "yes", false, "Run the missing setup steps without asking (never approves tools); with --apply, restart services without asking")
+	cmd.Flags().BoolVar(&o.check, "check", false, "Compare the background services with the parts section of ~/.aimux/config.yaml and say what --apply would change; change nothing. Exit 1 when something would change")
+	cmd.Flags().BoolVar(&o.apply, "apply", false, "Make the background services match the parts section of ~/.aimux/config.yaml: only the arguments that come from the settings change in a job file, and a service that does not answer afterwards gets its old job file back")
 	cmd.Flags().StringVar(&o.extID, "extension-id", "", "Wingman extension id (32 letters a-p, from chrome://extensions): register the Chrome native host for it")
 	cmd.Flags().StringVar(&o.sandboxDir, "sandbox-dir", defaultSandboxDir(env.Home),
 		"The wingman repo's sandbox directory (Containerfile, claude-code-oauth.yaml)")
@@ -126,6 +149,8 @@ func newSetupCmdWith(env frontEnv) *cobra.Command {
 
 type setupOpts struct {
 	yes        bool
+	check      bool
+	apply      bool
 	extID      string
 	sandboxDir string
 }
