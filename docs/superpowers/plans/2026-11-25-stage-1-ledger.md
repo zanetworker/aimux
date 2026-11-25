@@ -196,6 +196,7 @@ Expected: PASS, including the existing `Count` tests
 
 **Interfaces:**
 - Consumes: `ledger.OpenWriter`, `(*ledger.Writer).Write`, `Stats`, `ledger.Line` (task 2); the fixtures and the rule (task 1).
+- Task 1 settled the rule (`docs/superpowers/specs/2026-11-25-turn-identity.md`): a request is a side request when it carries the `X-Claude-Code-Agent-Id` header or has no session id in its metadata, and a turn starts on a request that is not a side request and whose last user message holds no `tool_result`. `ledger.Line` gains `Agent string` with the JSON name `aimux.agent`, the subagent's id.
 - Produces:
 
 ```go
@@ -205,13 +206,13 @@ func WithLedger(w *ledger.Writer) HandlerOption
 // LedgerFile is the writer's name for a proxy on port: "model-proxy" on StablePort, else "model-proxy-<port>".
 func LedgerName(port int) string
 
-// turns numbers a session's turns. next reports the turn a request belongs to: mainConversation is false for a
-// subagent or background request; startsTurn is true when the request ends in a user message that is not only
-// tool results; prompts is how many such user messages the request's own message list holds. The number never
+// turns numbers a session's turns. next reports the turn a request belongs to: side is true for a subagent or
+// background request; startsTurn is true when the last user message holds no tool_result; prompts is how many
+// user messages without a tool_result the request's own message list holds. The number never
 // goes below prompts, so a session the table forgot, or a proxy that restarted, does not reuse a number while the
 // conversation is still in the request. It is returned as a decimal string, "" when session is empty.
 type turns struct{ /* per-session counters, bounded like the session table */ }
-func (t *turns) next(session string, mainConversation, startsTurn bool, prompts int) (turn string, side bool)
+func (t *turns) next(session string, side, startsTurn bool, prompts int) (turn string)
 // seed sets each session's counter from lines already in the ledger, so a restart after a compaction (when the
 // request no longer holds the earlier prompts) still goes on from the last number written.
 func (t *turns) seed(lines []ledger.Line)
@@ -225,15 +226,16 @@ LedgerFailed uint64 `json:"ledger_failed,omitempty"`
 LedgerOff    bool   `json:"ledger_off,omitempty"` // the ledger file could not be opened at start
 ```
 
-- Line content: `Kind` `model_call`; `Session` the full id from the request's `metadata.user_id` `session_id`, else the `X-Claude-Code-Session-Id` header, else empty; `Turn` from `turns.next`; `Call` a new id (`"mc_" + rand.Text()`); `RequestModel` the model the client named; `ResponseModel` `"codex:" + turn.Model`; `Engine` `"codex"`; `Harness` `"claude-code"` when the `User-Agent` starts with `claude-cli`, else empty; tokens, estimate flag, time to first byte and duration from the same values the request history gets; `Outcome` `"ok"` or the value the history's `error` field would hold. A request the proxy rejects before Codex (`invalid_request`) writes no line: it is not a model call.
+- Line content: `Kind` `model_call`; `Session` the full id from the request's `metadata.user_id` `session_id`, else the `X-Claude-Code-Session-Id` header, else empty; `Side` and `Agent` by the rule above; `Turn` from `turns.next`; `Call` a new id (`"mc_" + rand.Text()`); `RequestModel` the model the client named; `ResponseModel` `"codex:" + turn.Model`; `Engine` `"codex"`; `Harness` `"claude-code"` when the `User-Agent` starts with `claude-cli`, else empty; tokens, estimate flag, time to first byte and duration from the same values the request history gets; `Outcome` `"ok"` or the value the history's `error` field would hold. A request the proxy rejects before Codex (`invalid_request`) writes no line: it is not a model call.
 
 - [ ] **Step 1: Write the failing turn tests** in `turns_test.go`, driven by task 1's fixtures:
 
 ```go
 func TestTurns_FromRecordedShapes(t *testing.T)
-// fresh-prompt -> "1", side false; tool-continuation -> "1"; subagent -> "1", side true;
-// a second fresh-prompt -> "2"; background (no session) -> "", side false;
-// after-compaction ends in a prompt -> "3" (the number goes on, it does not restart).
+// each fixture's own starts_turn and side fields are what the request classifier returns for its shape;
+// then, in one session: fresh-prompt -> "1"; tool-continuation and tool-continuation-with-text -> "1";
+// subagent -> "1"; background -> "1"; a second fresh-prompt -> "2"; after-compaction -> "3" (the number
+// goes on although its list holds 2 prompts).
 
 func TestTurns_SessionsDoNotShareNumbers(t *testing.T)
 // session A prompt, session B prompt, session A prompt: A is "1" then "2", B is "1".

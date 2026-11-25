@@ -1,0 +1,52 @@
+{
+ "note": "The harness returns a tool result: the last user message holds only a tool_result.",
+ "metadata_session": true,
+ "session_header": true,
+ "agent_header": false,
+ "outcome": "hit_continuation",
+ "tools": 12,
+ "messages": [
+  {
+   "role": "user",
+   "kinds": [
+    "text",
+    "text",
+    "text"
+   ]
+  },
+  {
+   "role": "system",
+   "kinds": [
+    "text"
+   ]
+  },
+  {
+   "role": "assistant",
+   "kinds": [
+    "tool_use"
+   ]
+  },
+  {
+   "role": "user",
+   "kinds": [
+    "tool_result",
+    "text"
+   ]
+  },
+  {
+   "role": "assistant",
+   "kinds": [
+    "tool_use"
+   ]
+  },
+  {
+   "role": "user",
+   "kinds": [
+    "tool_result"
+   ]
+  }
+ ],
+ "prompts": 1,
+ "starts_turn": false,
+ "side": false
+}

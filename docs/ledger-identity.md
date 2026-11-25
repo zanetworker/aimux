@@ -12,7 +12,7 @@ Every line carries up to four ids, and the join is decided when the line is writ
 |---|---|---|
 | run | one Wingman question, spanning its stages | new: the run engine mints it per question and passes it to each stage with the lease. `profilerun.RunState.Children` already maps each stage to its session. Never inferred from a sandbox name |
 | session | one conversation in a harness | the harness's own session id, in full. The 8-character tag derived from it stays for display only |
-| turn | one user request and everything done for it | new; the model proxy and the hook both derive it |
+| turn | one user request and everything done for it | a number per session, derived by the model proxy and the hook each on its own; the rule and its evidence are in `superpowers/specs/2026-11-25-turn-identity.md` |
 | call | one tool invocation, or one model request | for a tool, the harness's own id for it (`tool_use_id` in Claude Code, the call id in Codex): hooks receive it, and the model proxy sees it in the conversation. For a model request, the model proxy mints one |
 
 Each line also carries its writer's name and a sequence number that only goes up for that writer. Hook events carry an event id: the call id plus the hook event's name.
@@ -21,7 +21,7 @@ Each line also carries its writer's name and a sequence number that only goes up
 
 | Kind | Written by | Ids it carries |
 |---|---|---|
-| `model_call` | model proxy | session, turn, and a call id the proxy mints. Background model calls arrive with no session |
+| `model_call` | model proxy | session, turn, and a call id the proxy mints. A subagent's call carries its parent's session and its agent id and is marked as a side call. A background call has no session in its request body; its session comes from the `X-Claude-Code-Session-Id` header |
 | `tool_call` (primary) | collector, from a hook | session, turn, the harness's call id, and the event id |
 | `tool_call` (primary) | tool gateway, in a sandbox | run, session and call id. A call from an admin-token caller has no session |
 | `tool_call` (secondary) | MCP proxy | the call id when the MCP request carries it; the proxy does not know the session today |

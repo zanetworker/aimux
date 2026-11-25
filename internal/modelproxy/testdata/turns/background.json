@@ -1,0 +1,27 @@
+{
+ "note": "A request with no session id in its metadata. Recorded from a request under a Claude model name, for which the proxy attached no session; whether its metadata held one was not recorded.",
+ "metadata_session": false,
+ "session_header": true,
+ "agent_header": false,
+ "outcome": "stateless",
+ "tools": 14,
+ "messages": [
+  {
+   "role": "user",
+   "kinds": [
+    "text",
+    "text",
+    "text"
+   ]
+  },
+  {
+   "role": "system",
+   "kinds": [
+    "text"
+   ]
+  }
+ ],
+ "prompts": 1,
+ "starts_turn": false,
+ "side": true
+}

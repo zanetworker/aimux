@@ -1,0 +1,27 @@
+{
+ "note": "The first request of a turn: the last user message holds only text.",
+ "metadata_session": true,
+ "session_header": true,
+ "agent_header": false,
+ "outcome": "new_session",
+ "tools": 12,
+ "messages": [
+  {
+   "role": "user",
+   "kinds": [
+    "text",
+    "text",
+    "text"
+   ]
+  },
+  {
+   "role": "system",
+   "kinds": [
+    "text"
+   ]
+  }
+ ],
+ "prompts": 1,
+ "starts_turn": true,
+ "side": false
+}
