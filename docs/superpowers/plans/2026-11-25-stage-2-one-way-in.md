@@ -112,14 +112,16 @@ type Settings struct {
 }
 type PartSettings struct {
 	Enabled bool
+	Serves  []string                  // inference-proxy: the APIs clients may speak; only "messages" is known
 	Engines map[string]Engine         // inference-proxy only: "anthropic", "codex", or a named upstream.
 	                                  // Codex is built in: it can be given a tier, never removed
 }
 type Engine struct {
-	Type        string         // "codex", "anthropic", "messages"
+	Type        string         // the backend's protocol: "codex-app-server", "messages"
+	Auth        string         // a messages engine: "caller" or "key"
 	Enabled     *bool          // nil: on, for an engine that is listed
 	URL         string         // a messages engine
-	Key         *secretref.Ref // a messages engine; nil: the Keychain item <name>-key
+	Key         *secretref.Ref // auth key; nil: the Keychain item <name>-key
 	ServiceTier string         // codex
 	Binary      string         // codex
 }

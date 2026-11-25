@@ -15,6 +15,7 @@ parts:
   inference-proxy:
     enabled: true
     port: 7385
+    serves: [messages]
     engines:
       codex:
         service_tier: priority
@@ -30,17 +31,37 @@ parts:
 ```
 
 A part has `enabled`, which every part that is listed must say, and the few settings that are true of the whole
-part. The inference proxy also has `engines`: a map from an engine's name to its settings.
+part.
+
+The inference proxy has two sides, and the file keeps them apart. `serves` is the front: the APIs a client may
+speak to it. `engines` is the back: who answers. An engine is a backend of the proxy; the code calls it
+`Backend`, the ledger and `aimux cost` call it an engine, and this file uses the ledger's word.
+
+```
+ client ──▶ an API the proxy serves ──▶ proxy ──▶ an engine, spoken to in its own protocol
+            (serves)                              (engines.<name>.type)
+```
+
+When the two are the same API the proxy forwards the request as it came. When they differ it translates. Today
+the front is the Messages API only, because the client is Claude Code; a client that speaks Responses or Chat
+Completions is a new value in `serves`, and no engine entry changes.
+
+| Client speaks | to a `codex-app-server` engine | to a `messages` engine | to a `responses` or `chat-completions` engine |
+|---|---|---|---|
+| Messages (Claude Code) | built, translated | built, forwarded | not built |
+| Responses, Chat Completions | not built | not built | not built |
 
 | Key | Under | Meaning | When left out |
 |---|---|---|---|
 | `enabled` | a part | `true`: aimux keeps the part's service running. `false`: aimux keeps it stopped | Not allowed. A part that is listed says one or the other; a part that is not listed is not managed |
 | `port` | `inference-proxy` | The port on 127.0.0.1 | What the installed job has; 7385 for a job aimux creates |
+| `serves` | `inference-proxy` | The APIs a client may speak to the proxy. `messages` is the only value this build knows | `[messages]` |
 | `engines` | `inference-proxy` | The engines the proxy can answer with, by name | What the installed job has; Codex only for a job aimux creates |
-| `type` | an engine | How aimux talks to it: `codex`, `anthropic`, `messages` | The name, for `codex` and `anthropic`. Required, as `messages`, for any other name |
+| `type` | an engine | The protocol the proxy speaks to it: `codex-app-server` (the Codex program, over its standard input and output) or `messages` (the Messages API at a `url`). The same word as in `serves` when it is the same API | `codex-app-server` for `codex`, `messages` for `anthropic`. Required for any other name |
+| `auth` | a `messages` engine | Whose credential is sent: `caller` (the session's own login, passed on) or `key` (the owner's key for that engine; the caller's credentials stay behind) | `caller` for `anthropic`, `key` for any other name |
 | `enabled` | an engine | Requests naming it are answered | On, for an engine that is listed. `false` on `codex` is refused: it cannot be turned off |
-| `url` | a `messages` engine | Where it is. A bare origin; `https` unless on this machine | Required |
-| `key` | a `messages` engine | Where its key is kept, in the form the other files use: `{keychain: {item: ...}}`, `{env: {name: ...}}`, `{file: {path: ...}}`, `{cmd: {argv: [...]}}` | `{keychain: {item: <name>-key}}`. `aimux engine add` writes it out, so renaming the engine later does not change which key it uses |
+| `url` | a `messages` engine | Where it is. A bare origin; `https` unless on this machine | Required. For `anthropic` it is `https://api.anthropic.com` and cannot be set: a login is only ever sent there |
+| `key` | a `messages` engine with `auth: key` | Where its key is kept, in the form the other files use: `{keychain: {item: ...}}`, `{env: {name: ...}}`, `{file: {path: ...}}`, `{cmd: {argv: [...]}}` | `{keychain: {item: <name>-key}}`. `aimux engine add` writes it out, so renaming the engine later does not change which key it uses |
 | `service_tier` | the `codex` engine | `priority` or `standard` | What the installed job has; `priority` for a job aimux creates |
 | `binary` | the `codex` engine | The Codex program to run | What the installed job has; otherwise `codex-lean` when installed, else `codex` |
 
@@ -54,35 +75,41 @@ Each key above is where it is for one of these reasons. A new key has to pass th
 2. **A setting lives with what it is true of.** The port is the proxy's. The service tier is Codex's. The address
    is one upstream's. Nothing that belongs to one engine sits at the proxy's level.
 3. **A name and a kind are two things.** The name is what the owner types before the colon in a model name
-   (`enmaas:claude-opus-5-5`), and is the map key. The kind is `type`. Two engines of one kind have two names.
-   The names `codex` and `anthropic` are kept for the two that are built in, where the name says the kind and
-   `type` can be left out; any other name says `type: messages`.
-4. **Named things are map keys, as everywhere else in aimux's files.** `servers`, `sets`, `sources`,
+   (`enmaas:claude-opus-5-5`), and is the map key; it says where a request goes, and the three in use are a
+   program, a company and a gateway. What the thing is, is said beside it: `type` for the protocol and `auth`
+   for whose credential. By those, there are two kinds of engine today, not three: the Codex program, and an
+   address that speaks the Messages API. Anthropic and the internal gateway are the same kind and differ only
+   in `auth`. The names `codex` and `anthropic` are kept for the two that are built in, whose settings are
+   implied and can be left out; any other name says its `type`.
+4. **The front and the back are separate, and use the same words.** `serves` lists APIs, `type` names a
+   protocol, and where they are the same API they are spelled the same, so whether a pair forwards or
+   translates can be read off the file. An engine does not imply a client.
+5. **Named things are map keys, as everywhere else in aimux's files.** `servers`, `sets`, `sources`,
    `environments`, `runtimes` and `providers` are all maps from a name to its settings, several with a `type`
    inside. A map cannot hold a name twice; one engine is one place in the file, which is what lets a command
    change one value; and order means nothing here, since the model name picks the engine.
-5. **Order appears only where order matters.** Trying one engine and then another is routing, which is stage 4.
+6. **Order appears only where order matters.** Trying one engine and then another is routing, which is stage 4.
    It will be a list of names that refers to this map, somewhere else in the file. It is not a reason to make
    this a list.
-6. **On and off are separate from existing.** `enabled: false` keeps an engine's `url` and `key`, so it can be
+7. **On and off are separate from existing.** `enabled: false` keeps an engine's `url` and `key`, so it can be
    turned on again without retyping them. Removing the entry forgets it.
-7. **A part has three states, and the file says which.** Not listed: aimux neither starts nor stops it.
+8. **A part has three states, and the file says which.** Not listed: aimux neither starts nor stops it.
    `enabled: true`: aimux keeps it running. `enabled: false`: aimux keeps it stopped. A part that is listed
    without `enabled` is refused, so an edit that looks valid cannot quietly do nothing, and adding the first
    part to the file cannot stop another. An engine is different on purpose: listing one turns it on, because
    the part that holds it already decides whether anything runs.
-8. **Taking a part under management changes nothing.** For a job that exists, a setting left out means "as it
+9. **Taking a part under management changes nothing.** For a job that exists, a setting left out means "as it
    is installed": its port, its Codex program, its engines. Defaults are only for a job aimux creates. So
    `inference-proxy: {enabled: true}` on a proxy running with a custom port keeps that port.
-9. **A name that is known and off is refused, never answered by something else.** A request naming
+10. **A name that is known and off is refused, never answered by something else.** A request naming
    `lab:model` when `lab` is disabled, or naming a prefix nobody defined, gets an error that says so. It does
    not fall through to Codex or Anthropic, with or without other upstreams configured. The proxy does not do
    this today when no upstream is configured; it is part of this stage.
-10. **No secret is in the file, or in a job file.** A key is a reference, in exactly the form `servers.yaml`
+11. **No secret is in the file, or in a job file.** A key is a reference, in exactly the form `servers.yaml`
     uses (`internal/secretref`). On another machine or in a container the reference changes (`env`, `file`) and
     nothing else does. The proxy is given the reference and reads the key itself; the value is never an
     argument of its job.
-11. **The words are the ones already in use.** `url` for an address, `enabled` for a switch, `type` for a kind,
+12. **The words are the ones already in use.** `url` for an address, `enabled` for a switch, `type` for a kind,
     `binary` for one program (as `providers.<name>.binary`; `command` in `servers.yaml` is a list of
     arguments), `port`, snake case.
 
@@ -174,8 +201,10 @@ meant. A command changes the text of one value and leaves the rest of the file a
   A project can never add an engine. An approval is for a name and its `url` together: when the `url` under an
   approved name changes, the owner is asked again. This page fixes only that the names are the join; the
   approvals are designed with routing.
-- **A new kind of engine.** An address that speaks another dialect is a new value of `type` with its own
-  keys. Existing entries do not change.
+- **A new kind of engine.** An address that speaks Chat Completions or Responses is a new value of `type`,
+  and needs a translator from each API in `serves`. Existing entries do not change.
+- **A new kind of client.** One that speaks Responses, as Codex's own CLI does, is a new value in `serves`, and
+  needs a translator to each engine `type` that is not the same API. Existing entries do not change.
 - **Another part.** Phone access, sandboxes, schedules and evals each get a key under `parts:` with `enabled`
   and their own settings. What they hold today under other top-level keys (`remote_access`, `otel`) keeps
   working; nothing is moved in this stage.
@@ -185,6 +214,10 @@ engine sends the caller's own login and takes plain model names, so a second ent
 nothing. The names `codex` and `anthropic` are reserved for now.
 
 ## Not decided here
+
+- **Whether the front is ready for a second API.** The Codex path already passes through a form of the
+  proxy's own (`Backend.Run` over a `TurnRequest`), which is where a second front would join. How much of that
+  form is still shaped like the Messages API was not looked at. `serves` is reserved here and not built.
 
 - **The collector.** `otel.enabled` and `otel.port` exist today, and the loader reads the port only when that
   switch is on. How `parts.collector` relates to them, and which wins when they disagree, is not settled, so
@@ -207,3 +240,8 @@ exists; `enabled` is required on a part that is listed; a project's narrowing is
 the key reference is `internal/secretref` exactly, written out by `add`; the built-in names are reserved and
 the second-account claim is dropped; the collector is left out until its two switches are reconciled; and
 `binary`, not `command`.
+
+The owner's review then changed it again, after that opinion and not seen by it: `type` is the protocol of the
+backend, with `codex-app-server` and `messages` as its values and no value of its own for Anthropic; `auth`
+says whose credential is sent; and the front is its own setting, `serves`, because the Messages API is what the
+proxy serves today and not what it is.
