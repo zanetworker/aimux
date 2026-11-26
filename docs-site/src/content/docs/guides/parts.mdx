@@ -134,3 +134,27 @@ A service of a part that is on, whose job is right and which does not answer, is
 Moving the model proxy to another port moves `aimux status` and `aimux upgrade` with it: both read the port from the job. A session still has to be pointed at the new port (`aimux model proxy env --port`), and the proxy's request history and ledger are kept per port, so a new port starts new files.
 
 Making a job for a service that has none is not built yet: `--check` says so for that part and `--apply` leaves it as it is.
+
+## See where a shell's sessions go
+
+A session goes through the model proxy only when the shell that started it points at the proxy (`aimux model proxy env`); every other session goes straight to Anthropic, or to whatever other gateway or provider its shell names, and is not recorded. To see which it is, and whether the proxy answers:
+
+```bash
+aimux model proxy route --model codex:gpt-6.2-sol
+```
+
+It prints one line, made for a status line or a prompt:
+
+```text
+direct · anthropic claude-opus-5-5
+proxy :7385 ok · codex gpt-6.2-sol
+proxy :7385 DOWN · codex gpt-6.2-sol
+proxy :7385 ok · anthropic claude-opus-5-5 (the anthropic engine is off)
+another gateway
+```
+
+`--model` is the model the session is on now, as Claude Code names it, so the line follows `/model`; without it the model the shell pins is used, if it pins one. The command reads the shell's environment and the proxy's keyless health answer, waits half a second at most, and never prints the proxy key or sends it anywhere.
+
+With `--json` it prints `{"schema_version": 1, "through_proxy", "port", "mode", "engine", "model", "proxy": {"state", "build", "engines", "engine_on"}}`. `mode` is `direct`, `engines` or `codex` (the two forms `env` sets), `unmarked` (a proxy on this machine, set by hand) or `elsewhere` (another gateway). `proxy.state` is `ok`, `degraded`, `down` (nothing answers on the port) or `not aimux` (something else answers there); `proxy` is left out when the sessions do not go through a proxy.
+
+It exits 1 when the sessions go through a proxy that does not answer, or whose engine for that model is off, so a status line can turn red on the exit code alone.
