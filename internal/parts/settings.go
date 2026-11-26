@@ -189,6 +189,9 @@ func (p PartSettings) ProxyArgs() []string {
 			}
 		}
 	}
+	if p.OnLimit != "" {
+		args = append(args, "--on-limit", p.OnLimit)
+	}
 	return args
 }
 

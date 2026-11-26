@@ -303,30 +303,31 @@ func serveEngines(w http.ResponseWriter, r *http.Request, carried credentials, p
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		codexRoutes.ServeHTTP(w, r)
 	case message:
-		serveAnthropicMessage(w, r, path, body, config)
+		serveAnthropicMessage(w, r, path, body, config, carried.proxyKey)
 	default:
 		config.anthropic.forward(w, r, path, body)
 	}
 }
 
 // serveAnthropicMessage forwards one model call to Anthropic and records it.
-func serveAnthropicMessage(w http.ResponseWriter, r *http.Request, path string, body []byte, config *handlerConfig) {
+func serveAnthropicMessage(w http.ResponseWriter, r *http.Request, path string, body []byte, config *handlerConfig, withProxyKey bool) {
 	// Read for the session, the turn and the model's name only. A body this does not fit is still forwarded.
 	var request messageRequest
 	_ = json.Unmarshal(body, &request)
-	serveForwardedMessage(w, r, r, path, body, request, engineAnthropic, config.anthropic, config)
+	serveForwardedMessage(w, r, r, path, body, request, engineAnthropic, config.anthropic, config, withProxyKey)
 }
 
 // serveForwardedMessage forwards one model call to engine and records it as the Codex path records its own: a
 // ledger line and a request-history record, with figures and ids and no text. r is the request as it came, read
 // for whose call this is; out is the request the engine sends on, which may be r itself; request is what body
-// held before anything was changed for the upstream.
-func serveForwardedMessage(w http.ResponseWriter, r, out *http.Request, path string, body []byte, request messageRequest, name string, engine *anthropicEngine, config *handlerConfig) forwardResult {
+// held before anything was changed for the upstream. withProxyKey: the request carried the proxy key.
+func serveForwardedMessage(w http.ResponseWriter, r, out *http.Request, path string, body []byte, request messageRequest, name string, engine *anthropicEngine, config *handlerConfig, withProxyKey bool) forwardResult {
 	timing := &messageTiming{ResponseWriter: w, started: time.Now(), firstByte: -time.Millisecond}
+	facts := callFactsOfMessages(r, request, request.OutputConfig.Effort)
 	var call *ledger.Line
 	if config.ledger != nil {
 		var change *ledger.Line
-		call, change = startModelCall(config.turns, callFactsOfMessages(r, request, request.OutputConfig.Effort), name, "")
+		call, change = startModelCall(config.turns, facts, name, "")
 		if change != nil {
 			config.ledger.Write(*change)
 		}
@@ -351,6 +352,10 @@ func serveForwardedMessage(w http.ResponseWriter, r, out *http.Request, path str
 	if call != nil {
 		finishModelCall(call, timing.started, timing.firstByte, result.Usage, failure, timing.status)
 		call.ResponseModel, call.UsageUnknown, call.Limit = ledgerModel(result.Model), !result.UsageKnown, result.Limit
+		// A report only: the answer has gone to the session as the upstream gave it.
+		if config.onLimit == OnLimitReport && result.Limit == limitPlan {
+			call.OnLimit = onLimitReport(facts, withProxyKey)
+		}
 		config.ledger.Write(*call)
 	}
 	return result

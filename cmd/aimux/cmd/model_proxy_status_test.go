@@ -266,3 +266,16 @@ func TestModelProxyStatusShowsTheAllowance(t *testing.T) {
 		t.Errorf("an allowance shown before any was seen:\n%s", out.String())
 	}
 }
+
+// A value --on-limit does not know is refused before anything is started or listened on.
+func TestModelProxyServeRejectsAnUnknownOnLimit(t *testing.T) {
+	root := newModelCmd()
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"proxy", "serve", "--on-limit", "always", "--port", "0"})
+	err := root.Execute()
+	if err == nil || !strings.Contains(err.Error(), "report") || strings.Contains(out.String(), "Model proxy at") {
+		t.Fatalf("err = %v\n%s", err, out.String())
+	}
+}

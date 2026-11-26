@@ -169,13 +169,14 @@ func SetJobArgs(plist []byte, args []string) ([]byte, error) {
 // proxyFlags are the arguments of the model proxy that come from the settings.
 type proxyFlags struct {
 	port, tier, binary string
+	onLimit            string
 	anthropic          bool
 	upstreams          map[string]string // name -> address
 	keys               map[string]string // name -> key reference, as JSON
 }
 
 // The model proxy's flags that take a value, and the ones that may repeat.
-var proxyValueFlags = map[string]bool{"--port": true, "--service-tier": true, "--codex-command": true, "--messages-upstream": true, "--messages-upstream-key": true}
+var proxyValueFlags = map[string]bool{"--port": true, "--service-tier": true, "--codex-command": true, "--messages-upstream": true, "--messages-upstream-key": true, "--on-limit": true}
 
 // split takes a service's arguments apart: the program, what aimux owns, and the rest in the order it was.
 func split(service Service, args []string) (program string, owned proxyFlags, other []string, err error) {
@@ -218,6 +219,8 @@ func split(service Service, args []string) (program string, owned proxyFlags, ot
 			owned.tier = value
 		case "--codex-command":
 			owned.binary = value
+		case "--on-limit":
+			owned.onLimit = value
 		default:
 			name, what, ok := strings.Cut(value, "=")
 			if !ok {
@@ -271,6 +274,9 @@ func (f proxyFlags) args() []string {
 			out = append(out, "--messages-upstream-key", name+"="+key)
 		}
 	}
+	if f.onLimit != "" {
+		out = append(out, "--on-limit", f.onLimit)
+	}
 	return out
 }
 
@@ -323,6 +329,9 @@ func WantedArgs(service Service, current []string, settings PartSettings) ([]str
 		}
 		if stated.binary != "" {
 			flags.binary = stated.binary
+		}
+		if stated.onLimit != "" {
+			flags.onLimit = stated.onLimit
 		}
 		if settings.Engines != nil {
 			flags.anthropic, flags.upstreams, flags.keys = stated.anthropic, stated.upstreams, stated.keys
