@@ -229,7 +229,7 @@ func serveNamedUpstream(w http.ResponseWriter, r *http.Request, carried credenti
 	var result forwardResult
 	if message {
 		// The ledger reads the session from the request as it came; the upstream gets the one built for it.
-		result = serveForwardedMessage(w, r, out, path, renamed, request, name, upstream.engine, config)
+		result = serveForwardedMessage(w, r, out, path, renamed, request, name, upstream.engine, config, true)
 	} else {
 		result = upstream.engine.forward(w, out, path, renamed)
 	}

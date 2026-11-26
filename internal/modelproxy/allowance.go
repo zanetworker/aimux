@@ -119,3 +119,26 @@ func (b *allowances) list() []EngineAllowance {
 	sort.Slice(out, func(i, j int) bool { return out[i].Engine < out[j].Engine })
 	return out
 }
+
+// OnLimitReport is the one thing the proxy can be told to do when a plan limit comes back, in this build: write
+// what a fallback would have done, and change nothing.
+const OnLimitReport = "report"
+
+// WithOnLimit sets what the proxy does when a plan limit comes back. Only OnLimitReport does anything.
+func WithOnLimit(mode string) HandlerOption {
+	return func(c *handlerConfig) { c.onLimit = mode }
+}
+
+// onLimitReport says what a fallback would have done for a call that met a plan limit: where it would have gone,
+// or why it would not have. It decides nothing and sends nothing. The two conditions are the ones a real
+// fallback will need first: the call opens a turn, so no tool's result is waiting to be answered, and it
+// carried the proxy key, since the other engine spends the owner's allowance.
+func onLimitReport(facts CallFacts, withProxyKey bool) string {
+	switch {
+	case !facts.StartsTurn:
+		return "would_not:not_a_fresh_turn"
+	case !withProxyKey:
+		return "would_not:no_proxy_key"
+	}
+	return "would:" + engineCodex
+}

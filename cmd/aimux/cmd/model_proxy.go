@@ -195,7 +195,7 @@ func newModelProxyStatsCmd() *cobra.Command {
 
 func newModelProxyServeCmd() *cobra.Command {
 	var port int
-	var command, serviceTier string
+	var command, serviceTier, onLimit string
 	var anthropic bool
 	var messagesUpstreams, messagesUpstreamKeys []string
 	cmd := &cobra.Command{
@@ -207,6 +207,10 @@ func newModelProxyServeCmd() *cobra.Command {
 				cmd.SilenceUsage = true
 				return fmt.Errorf("unknown --service-tier %q: choose %s or %s",
 					serviceTier, modelproxy.ServiceTierPriority, modelproxy.ServiceTierStandard)
+			}
+			if onLimit != "" && onLimit != modelproxy.OnLimitReport {
+				cmd.SilenceUsage = true
+				return fmt.Errorf("unknown --on-limit %q: the one value in this build is %s", onLimit, modelproxy.OnLimitReport)
 			}
 			addr := fmt.Sprintf("127.0.0.1:%d", port)
 			ln, err := net.Listen("tcp4", addr)
@@ -275,6 +279,9 @@ func newModelProxyServeCmd() *cobra.Command {
 			} else {
 				handlerOptions = append(handlerOptions, modelproxy.WithLedgerOff())
 			}
+			if onLimit != "" {
+				handlerOptions = append(handlerOptions, modelproxy.WithOnLimit(onLimit))
+			}
 			if anthropic {
 				option, err := modelproxy.WithAnthropic(modelproxy.AnthropicUpstream)
 				if err != nil {
@@ -322,6 +329,7 @@ func newModelProxyServeCmd() *cobra.Command {
 		"Another address that speaks the Messages API, as name=address (may be repeated). A request naming a model as <name>:<model> with the proxy key is sent there, with that upstream's key and none of the caller's credentials. The key is read from the secret-store entry <name>-key unless --messages-upstream-key says where else it is kept. A plain model name, with no prefix, still goes to Codex or Anthropic")
 	cmd.Flags().StringArrayVar(&messagesUpstreamKeys, "messages-upstream-key", nil,
 		`Where a --messages-upstream's key is kept, as name=reference, when it is not the secret-store entry <name>-key. The reference is the JSON form the config file's key takes, such as enmaas={"env":{"name":"ENMAAS_KEY"}}; it is never the key itself`)
+	cmd.Flags().StringVar(&onLimit, "on-limit", "", "What to do when a plan limit comes back from an engine: report writes, on the call's ledger line, what a fallback to another engine would have done, and changes nothing. Empty: nothing")
 	cmd.Flags().StringVar(&serviceTier, "service-tier", modelproxy.ServiceTierPriority,
 		"OpenAI service tier: priority is Codex's Fast tier (about twice the tokens a second, spending the plan's allowance faster); standard leaves Codex's own default")
 	return cmd

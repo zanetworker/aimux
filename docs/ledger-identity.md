@@ -75,4 +75,6 @@ A model call carries `aimux.role`, the kind of work it was: `main`, `subagent` o
 
 A failed model call that met a limit carries `aimux.limit`: `short` for a rate limit of the moment, which the harness sends again by itself, and `plan` when the plan's allowance is used up until its window starts again. The two are told apart by the plan's own word in the answer's headers, not by the status, which is 429 for both. Only a call passed on to an engine that speaks the Messages API can carry it; a Codex turn does not.
 
+A call that met a plan limit on a proxy told to report (`--on-limit report`) also carries `aimux.on_limit`: `would:<engine>` when a fallback would have gone there, `would_not:<reason>` otherwise. It is a report: nothing was sent anywhere else.
+
 A model call that failed carries `http.response.status_code`, the status the session was given: 429 for a rate limit, 401 for a refused login, 502 when the proxy itself had to answer for an engine that gave none. It is absent on a call that succeeded and on one that ended before any answer; `aimux.outcome` still holds the writer's own word for what went wrong. The field is an addition to schema 1: a reader that does not know it ignores it.

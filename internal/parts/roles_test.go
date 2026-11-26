@@ -2,6 +2,7 @@ package parts
 
 import (
 	"os"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -174,4 +175,30 @@ func readFile(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(data)
+}
+
+// on_limit in the file becomes an argument of the proxy's start command, and is taken out when the file drops it
+// only by a file that states it otherwise: a setting left out keeps what is installed.
+func TestOnLimit_ReachesTheJob(t *testing.T) {
+	service := MustService("model-proxy")
+	stated, _ := Parse([]byte("parts:\n  inference-proxy:\n    enabled: true\n    on_limit: report\n"))
+	p := stated.Parts["inference-proxy"]
+	if args := p.ProxyArgs(); !slices.Equal(args, []string{"--on-limit", "report"}) {
+		t.Fatalf("ProxyArgs = %q", args)
+	}
+	current := []string{"/x/aimux", "model", "proxy", "serve", "--anthropic", "--verbose"}
+	wanted, err := WantedArgs(service, current, p)
+	if err != nil || !slices.Equal(wanted, []string{"/x/aimux", "model", "proxy", "serve", "--verbose", "--anthropic", "--on-limit", "report"}) {
+		t.Fatalf("wanted = %q, %v", wanted, err)
+	}
+	// A job that has it already is not rewritten.
+	if !SameArgs(service, wanted, append(slices.Clone(current[:4]), "--on-limit=report", "--anthropic", "--verbose")) {
+		t.Error("the same arguments in another order and spelling are not the same")
+	}
+	// Left out of the file, what is installed stays.
+	bare, _ := Parse([]byte("parts:\n  inference-proxy:\n    enabled: true\n"))
+	kept, _ := WantedArgs(service, wanted, bare.Parts["inference-proxy"])
+	if !slices.Equal(kept, wanted) {
+		t.Errorf("left out, the job changed: %q", kept)
+	}
 }

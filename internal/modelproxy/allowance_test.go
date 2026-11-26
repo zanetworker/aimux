@@ -2,6 +2,7 @@ package modelproxy
 
 import (
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -150,5 +151,87 @@ func TestHandler_AllowanceAndLimitAreRecorded(t *testing.T) {
 	}
 	if h := readHealth(t, p.handler, http.StatusOK); h.Allowance[0].Status != "rejected" {
 		t.Errorf("after the refusal: %+v", h.Allowance)
+	}
+}
+
+// With on_limit: report, a plan limit is recorded with what a fallback would have done. The session's answer is
+// the upstream's, byte for byte, and nothing is ever sent to another engine.
+func TestHandler_OnLimitReport(t *testing.T) {
+	refusal := anthropicFixture(t, "error.json")
+	newProxy := func(report bool, planSays string) (twoEngines, func() int) {
+		upstream, _ := anthropicStandIn(t, func(w http.ResponseWriter, r *http.Request) {
+			for name, values := range realAllowanceHeaders() {
+				w.Header()[name] = values
+			}
+			w.Header().Set("anthropic-ratelimit-unified-status", planSays)
+			w.Header().Set("Content-Type", jsonType)
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write(refusal)
+		})
+		backend, codexLog := newFakeBackend(t)
+		dir := filepath.Join(t.TempDir(), "ledger")
+		writer, err := ledger.OpenWriter(dir, LedgerName(StablePort))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = writer.Close() })
+		engine, err := WithAnthropic(upstream.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		options := []HandlerOption{WithLedger(writer), engine}
+		if report {
+			options = append(options, WithOnLimit(OnLimitReport))
+		}
+		p := twoEngines{ledgerProxy: ledgerProxy{NewHandler(backend, testKey, options...), dir, writer}}
+		turns := func() int {
+			data, _ := os.ReadFile(codexLog) // #nosec G304 -- the fake Codex's own log
+			return strings.Count(string(data), "turn ")
+		}
+		return p, turns
+	}
+	login := map[string]string{"Authorization": callersLogin}
+	withKey := "/k/" + testKey + "/v1/messages"
+
+	p, codexTurns := newProxy(true, "rejected")
+	// A fresh prompt, with the proxy key: a fallback would have gone to Codex.
+	res := p.send(t, withKey, "claude-sonnet-5-5", "0b61f1d5-report", "hello", login)
+	if res.Code != http.StatusTooManyRequests || res.Body.String() != string(refusal) {
+		t.Fatalf("the session got HTTP %d %q, not the upstream's own answer", res.Code, res.Body)
+	}
+	// The same without the proxy key: Codex spends the owner's allowance, and this caller may not.
+	p.send(t, "/v1/messages", "claude-sonnet-5-5", "0b61f1d5-report", "hello again", login)
+	lines := p.lines(t)
+	if len(lines) != 2 || lines[0].OnLimit != "would:codex" || lines[1].OnLimit != "would_not:no_proxy_key" || lines[0].Limit != limitPlan {
+		t.Fatalf("on_limit on the lines: %q, %q (limit %q)", lines[0].OnLimit, lines[1].OnLimit, lines[0].Limit)
+	}
+	if codexTurns() != 0 {
+		t.Fatal("a report sent a turn to Codex")
+	}
+
+	// A short rate limit is no plan limit: nothing is reported.
+	p, _ = newProxy(true, "allowed")
+	p.send(t, withKey, "claude-sonnet-5-5", "0b61f1d5-short", "hello", login)
+	if lines := p.lines(t); len(lines) != 1 || lines[0].OnLimit != "" || lines[0].Limit != limitShort {
+		t.Fatalf("a short limit: %+v", lines)
+	}
+	// Without on_limit nothing is reported, whatever the limit.
+	p, _ = newProxy(false, "rejected")
+	p.send(t, withKey, "claude-sonnet-5-5", "0b61f1d5-off", "hello", login)
+	if lines := p.lines(t); len(lines) != 1 || lines[0].OnLimit != "" || lines[0].Limit != limitPlan {
+		t.Fatalf("with no on_limit: %+v", lines)
+	}
+}
+
+// A request that carries a tool's result is in the middle of a turn: a fallback would not have taken it.
+func TestOnLimitReport_NotAFreshTurn(t *testing.T) {
+	if got := onLimitReport(CallFacts{StartsTurn: false}, true); got != "would_not:not_a_fresh_turn" {
+		t.Errorf("mid-turn = %q", got)
+	}
+	if got := onLimitReport(CallFacts{StartsTurn: true}, true); got != "would:codex" {
+		t.Errorf("fresh, with the key = %q", got)
+	}
+	if got := onLimitReport(CallFacts{StartsTurn: true}, false); got != "would_not:no_proxy_key" {
+		t.Errorf("fresh, without the key = %q", got)
 	}
 }

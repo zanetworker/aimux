@@ -29,6 +29,8 @@ type handlerConfig struct {
 	upstreams map[string]*namedUpstream
 	// allowances is the plan allowance last seen in each engine's answers.
 	allowances *allowances
+	// onLimit is what to do when a plan limit comes back: empty, or OnLimitReport.
+	onLimit string
 }
 
 // WithRequestLog records one line per answered request, for `aimux model proxy stats`.
