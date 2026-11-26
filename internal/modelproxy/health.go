@@ -29,6 +29,8 @@ type Health struct {
 	Probe StageHealth `json:"codex_probe"`
 	// Ledger is the record this proxy writes of its model calls. Empty when it was given none.
 	Ledger LedgerHealth `json:"ledger"`
+	// Allowance is the plan allowance last seen in each engine's answers; empty until one has said.
+	Allowance []EngineAllowance `json:"allowance,omitempty"`
 }
 
 // LedgerHealth is how the proxy's ledger writer is doing.

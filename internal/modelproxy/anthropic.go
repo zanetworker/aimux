@@ -49,6 +49,11 @@ type forwardResult struct {
 	// KeyRefused: the upstream refused a credential that was the proxy's own, and the client was told so in the
 	// proxy's words.
 	KeyRefused bool
+	// Allowance is what the answer said of the plan behind the credential; AllowanceKnown is false when it said
+	// nothing. Limit is the kind of limit a failed call met, if it met one.
+	Allowance      Allowance
+	AllowanceKnown bool
+	Limit          string
 }
 
 // newAnthropicEngine checks upstream is a bare origin (scheme and host, nothing else), so a path, a query or a
@@ -132,6 +137,9 @@ func (e *anthropicEngine) forward(w http.ResponseWriter, r *http.Request, reques
 	}
 
 	result := forwardResult{Status: resp.StatusCode, Outcome: forwardOK}
+	// The plan's allowance is read as the answer passes; the headers go on to the session unchanged.
+	result.Allowance, result.AllowanceKnown = allowanceOf(resp.Header)
+	result.Limit = limitKind(resp.StatusCode, result.Allowance, result.AllowanceKnown)
 	succeeded := resp.StatusCode >= 200 && resp.StatusCode < 300
 	if !succeeded {
 		result.Outcome = forwardUpstreamErr

@@ -225,3 +225,44 @@ func TestModelProxyStatusCountsWhatItPassedOn(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out.String())
 	}
 }
+
+// The plan's allowance, as the proxy last saw it in an engine's answer: how much is used, when it starts again,
+// and how old the figure is. Nothing is shown until an answer has said.
+func TestModelProxyStatusShowsTheAllowance(t *testing.T) {
+	health := fixtureHealth()
+	seen := healthNow.Add(-2 * time.Minute)
+	reset := healthNow.Add(50 * time.Hour)
+	show := func(a modelproxy.Allowance) string {
+		t.Helper()
+		health.Allowance = []modelproxy.EngineAllowance{{Engine: "anthropic", Allowance: a, SeenAt: seen}}
+		body, _ := json.Marshal(health)
+		addr, _ := fakeProxy(t, http.StatusOK, string(body))
+		var out bytes.Buffer
+		if err := modelProxyStatus(context.Background(), addr, "secret-key", "", &out, func() time.Time { return healthNow }); err != nil {
+			t.Fatal(err)
+		}
+		return out.String()
+	}
+	text := show(modelproxy.Allowance{Status: "allowed", Window: "seven_day", Used: 0.36, ResetsAt: reset})
+	for _, want := range []string{"Claude allowance", "36% of the week used", "starts again in 2d2h", "seen 2m"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("no %q in:\n%s", want, text)
+		}
+	}
+	if text := show(modelproxy.Allowance{Status: "allowed", Window: "five_hour", Used: 0.915}); !strings.Contains(text, "92% of the five hours used") || strings.Contains(text, "starts again") {
+		t.Errorf("five hours, no reset:\n%s", text)
+	}
+	// The plan refusing is said in its own word; a share that was not given is not shown as zero.
+	text = show(modelproxy.Allowance{Status: "rejected", Window: "seven_day", Used: -1, ResetsAt: reset})
+	if !strings.Contains(text, "the plan refuses requests (rejected)") || strings.Contains(text, "% of") {
+		t.Errorf("refused:\n%s", text)
+	}
+	health.Allowance = nil
+	body, _ := json.Marshal(health)
+	addr, _ := fakeProxy(t, http.StatusOK, string(body))
+	var out bytes.Buffer
+	_ = modelProxyStatus(context.Background(), addr, "secret-key", "", &out, func() time.Time { return healthNow })
+	if strings.Contains(out.String(), "allowance") {
+		t.Errorf("an allowance shown before any was seen:\n%s", out.String())
+	}
+}

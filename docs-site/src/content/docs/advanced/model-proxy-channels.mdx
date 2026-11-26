@@ -25,6 +25,14 @@ aimux model proxy status --port 7386  # a dev listener
 
 It prints the proxy's state and uptime, whether its Codex app-server is running, how many turns it has sent to Codex and how the last one went (`Codex turns`), how many calls it passed on to each other engine since it started and how many of those failed (`Passed on`, read from its request history and left out when there were none), and the same as for turns for the rate-limit checks behind the usage snapshot. Those checks cost no tokens, so a recent one shows the Codex login still works; only the stable listener makes them. Asking costs nothing and never starts Codex. The proxy starts Codex itself when it starts and writes how long that took to its log (`model proxy: Codex started in 3636ms`), so the first request does not wait for it. If the start fails, the log says why, the proxy keeps serving, and the next request starts Codex again.
 
+It also shows your plan's allowance, once a call has passed to Anthropic on your login:
+
+```text
+Claude allowance           38% of the week used, starts again in 4d5h (seen 0m ago)
+```
+
+Every answer from Anthropic on a subscription login says, in its headers, whether the plan allows the request, which window binds (the week or the five hours), how much of it is used and when it starts again. The proxy reads that as the answer passes and keeps the latest in memory; the headers go on to the session unchanged. The figure is as old as the last such answer, which the line says, and it is the plan of whoever sent that request: on your own machine, yours. Nothing is shown until an answer has said, and a share the answer did not give is left out, never shown as nothing used. It is kept per engine: a named upstream whose answers carry the same headers gets a line of its own, and that figure belongs to the key the proxy sent there. Only plain words and numbers are kept from those headers. It is in the keyed `GET /health` only, not in the keyless one.
+
 The command exits non-zero when the proxy is degraded or not running, so a monitor can act on the exit code. The proxy is degraded when its most recent turn failed, or its most recent rate-limit check failed; a later success clears it. A request Claude Code malformed is not counted, and neither is a turn you interrupted. A turn Codex refused because the conversation no longer fits its context window is counted as a turn that worked: Codex answered, and the proxy is not degraded by it.
 
 The same report is `GET /health` on the proxy, as JSON: 200 when healthy, 503 when degraded. `GET /health` requires the proxy key, like every route but one. `GET /healthz` is that one exception: it needs no key and always answers 200 with less: the service name, `ok` or `degraded`, the build, the start time and the last successful turn and the ledger's line counts, without error text or request counts. `aimux status` reads `/healthz`.

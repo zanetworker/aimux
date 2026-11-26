@@ -71,6 +71,9 @@ type Line struct {
 	// Status is the HTTP status the session was given for a call that failed: 429 for a rate limit, 401 for a
 	// refused login. Absent for a call that succeeded, and for one that ended before any answer.
 	Status int `json:"http.response.status_code,omitempty"`
+	// Limit is the kind of limit a failed model call met: "short" (a rate limit of the moment, which the harness
+	// retries) or "plan" (the plan's allowance is used up until its window starts again). Absent otherwise.
+	Limit string `json:"aimux.limit,omitempty"`
 
 	// A switch: the session's main conversation was answered by another engine than the time before.
 	FromEngine string `json:"aimux.from_engine,omitempty"`

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/zanetworker/aimux/internal/modelproxy"
+	"github.com/zanetworker/aimux/internal/parts"
 )
 
 // modelProxyStatus prints what the proxy at addr reports about itself and fails when it is unwell, so a monitor
@@ -118,6 +119,13 @@ func writeHealthTable(out io.Writer, addr string, health modelproxy.Health, pass
 	if line := ledgerLine(health.Ledger); line != "" {
 		_, _ = fmt.Fprintf(table, "Ledger\t\t%s\n", line)
 	}
+	for _, a := range health.Allowance {
+		name := a.Engine
+		if a.Engine == parts.EngineAnthropic {
+			name = "Claude"
+		}
+		_, _ = fmt.Fprintf(table, "%s allowance\t\t%s\n", name, allowanceLine(a, now))
+	}
 	_ = table.Flush()
 }
 
@@ -154,4 +162,43 @@ func since(now, then time.Time) string {
 		return "just now"
 	}
 	return elapsed.String() + " ago"
+}
+
+// allowanceLine says a plan's allowance as an engine's last answer gave it: the share used and when the window
+// starts again, in the plan's own word when it refuses, and how old the figure is. A figure the answer did not
+// give is left out, never shown as nothing used.
+func allowanceLine(a modelproxy.EngineAllowance, now time.Time) string {
+	window := map[string]string{"seven_day": "the week", "five_hour": "the five hours"}[a.Window]
+	if window == "" {
+		window = "the plan's window"
+	}
+	allowed := a.Status == "allowed" || a.Status == "allowed_warning"
+	var said []string
+	switch {
+	case !allowed:
+		said = append(said, "the plan refuses requests ("+printable(a.Status)+")")
+	case a.Used >= 0:
+		said = append(said, fmt.Sprintf("%.0f%% of %s used", a.Used*100, window))
+	default:
+		said = append(said, "allowed; the share used was not given")
+	}
+	if a.Used >= 0 && !allowed {
+		said = append(said, fmt.Sprintf("%.0f%% of %s used", a.Used*100, window))
+	}
+	if left := a.ResetsAt.Sub(now); !a.ResetsAt.IsZero() && left > 0 {
+		said = append(said, "starts again in "+spanText(left))
+	}
+	return strings.Join(said, ", ") + " (seen " + spanText(now.Sub(a.SeenAt)) + " ago)"
+}
+
+// spanText is a length of time in its two largest parts: 2d2h, 3h05m, 4m.
+func spanText(d time.Duration) string {
+	d = d.Round(time.Minute)
+	switch {
+	case d >= 24*time.Hour:
+		return fmt.Sprintf("%dd%dh", int(d.Hours())/24, int(d.Hours())%24)
+	case d >= time.Hour:
+		return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
+	}
+	return fmt.Sprintf("%dm", int(d.Minutes()))
 }

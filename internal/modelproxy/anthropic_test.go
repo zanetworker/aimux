@@ -327,7 +327,7 @@ func TestAnthropicEngine_UpstreamError(t *testing.T) {
 	if resp.StatusCode != 429 || resp.Header.Get("Retry-After") != "7" || !bytes.Equal(got, anthropicFixture(t, "error.json")) {
 		t.Errorf("client got %d, Retry-After %q, body %q", resp.StatusCode, resp.Header.Get("Retry-After"), got)
 	}
-	want := forwardResult{Status: 429, Outcome: "upstream_error"}
+	want := forwardResult{Status: 429, Outcome: "upstream_error", Limit: limitShort}
 	if result := waitResult(t, results); result != want {
 		t.Errorf("result = %+v, want %+v", result, want)
 	}
