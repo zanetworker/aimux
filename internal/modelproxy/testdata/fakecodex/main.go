@@ -288,6 +288,12 @@ func main() {
 				continue
 			}
 			result(msg.ID, tid)
+			if text == "context-overflow" {
+				// What the real app-server sends when a conversation no longer fits the model's window, word for word.
+				notify("turn/completed", tid, map[string]any{"turn": map[string]any{"id": tid + "-turn", "status": "failed",
+					"error": map[string]string{"message": "Error running remote compact task: Codex ran out of room in the model's context window. Start a new thread or clear earlier history before retrying."}}})
+				continue
+			}
 			switch text {
 			case "tool":
 				require(th.model == "gpt-6.2-sol" && p.Effort == "low" && strings.HasSuffix(th.system, "\n\nbase instructions") &&

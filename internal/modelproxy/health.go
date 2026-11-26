@@ -135,6 +135,11 @@ func (h *healthState) observe(ctx context.Context, stage *stageState, err error)
 	if errors.Is(ctx.Err(), context.Canceled) {
 		return
 	}
+	// A conversation too long for its model is that session's to shorten. Codex answered, and correctly: the turn
+	// is counted, and as one that worked, so an earlier failure no longer stands as the last word.
+	if err != nil && classifyFailure(err) == failureContextTooLong {
+		err = nil
+	}
 	h.record(stage, err)
 }
 

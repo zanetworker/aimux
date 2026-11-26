@@ -249,13 +249,20 @@ func serveMessage(w http.ResponseWriter, r *http.Request, backend Backend, confi
 	if err != nil {
 		// The client is told what went wrong; the history keeps a kind, so no upstream text reaches the file.
 		failure = classifyFailure(err)
+		// A conversation that no longer fits the model is said as the Messages API says it. Claude Code knows
+		// that answer and compacts; a server error it sends again, and the same conversation fails the same way.
+		status, kind, message := http.StatusBadGateway, "api_error", err.Error()
+		if failure == failureContextTooLong {
+			status, kind = http.StatusBadRequest, "invalid_request_error"
+			message = "prompt is too long: the conversation no longer fits the model's context window (" + err.Error() + ")"
+		}
 		if stream.started {
 			if stream.closeText() == nil {
 				// A lost connection cannot receive an error event.
-				_ = stream.write("error", map[string]any{"error": apiError{"api_error", err.Error()}})
+				_ = stream.write("error", map[string]any{"error": apiError{kind, message}})
 			}
 		} else {
-			writeError(w, http.StatusBadGateway, "api_error", err.Error())
+			writeError(w, status, kind, message)
 		}
 		return
 	}
@@ -310,6 +317,9 @@ func (w *messageTiming) Write(data []byte) (int, error) {
 
 func (w *messageTiming) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
+// failureContextTooLong is a turn the engine refused because the conversation does not fit its context window.
+const failureContextTooLong = "context_too_long"
+
 // classifyFailure names a failure in a fixed vocabulary, so the history stays free of content a model or a tool
 // may have echoed into an error message.
 func classifyFailure(err error) string {
@@ -322,11 +332,23 @@ func classifyFailure(err error) string {
 		return "timeout"
 	case errors.Is(err, context.Canceled):
 		return "cancelled"
+	case strings.Contains(err.Error(), "codex turn") && contextOverflow(err.Error()):
+		return failureContextTooLong
 	case strings.Contains(err.Error(), "codex turn"):
 		return "turn_failed"
 	default:
 		return "upstream_error"
 	}
+}
+
+// contextOverflow reports whether a failed turn's own words say the conversation did not fit the model's
+// context window. The first is what Codex's app-server says when compacting before a turn also runs out of
+// room; the second is the API's error code for the same thing.
+func contextOverflow(message string) bool {
+	// The exact words, not any mention of a context window: another failure may talk about one too, and must
+	// stay a failure that is retried and counted.
+	lower := strings.ToLower(message)
+	return strings.Contains(lower, "ran out of room in the model's context window") || strings.Contains(lower, "context_length_exceeded")
 }
 
 func writeError(w http.ResponseWriter, status int, kind, message string) {

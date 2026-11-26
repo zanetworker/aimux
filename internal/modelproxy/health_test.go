@@ -278,3 +278,18 @@ type fakeBackendNoHealth struct{}
 func (fakeBackendNoHealth) Run(context.Context, TurnRequest, func(Event) error) (Usage, error) {
 	return Usage{}, errors.New("no turns here")
 }
+
+// A conversation that does not fit its model says nothing about the proxy's health: the proxy stays ok, where a
+// failed turn of any other kind makes it degraded.
+func TestHealthIsNotDegradedByAConversationTooLong(t *testing.T) {
+	backend, _ := newFakeBackend(t)
+	handler := NewHandler(backend, testKey)
+	body := `{"model":"codex:gpt-6.2-sol","max_tokens":64,"messages":[{"role":"user","content":"context-overflow"}]}`
+	if res := request(handler, http.MethodPost, "/v1/messages", body); res.Code != http.StatusBadRequest {
+		t.Fatalf("HTTP %d: %s", res.Code, res.Body)
+	}
+	health := readHealth(t, handler, http.StatusOK)
+	if health.Status != "ok" || health.Requests.Failed != 0 || health.Requests.Total != 1 {
+		t.Fatalf("health = %+v", health)
+	}
+}

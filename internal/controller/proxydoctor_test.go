@@ -158,3 +158,13 @@ func TestDiagnoseProxy_AStoppedTurnIsNotAFailure(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 }
+
+// A conversation too long for its model is the session's to shorten, not a failure of the proxy.
+func TestDiagnoseProxy_AConversationTooLongIsNotAProxyFailure(t *testing.T) {
+	f := healthyProxy()
+	f.Failures = []CallFailure{{Engine: "codex", Status: 400, Error: "context_too_long", Count: 3, LastAt: doctorNow}}
+	got := finding(t, DiagnoseProxy(f), "calls")
+	if got.Level != FindingWarn || !strings.Contains(got.Detail, "did not fit") || !strings.Contains(got.Fix, "/compact") {
+		t.Fatalf("%+v", got)
+	}
+}

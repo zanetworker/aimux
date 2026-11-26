@@ -244,6 +244,11 @@ func callsFinding(f ProxyFacts) ProxyFinding {
 		switch {
 		case x.Status == 429:
 			parts = append(parts, fmt.Sprintf("%s hit %s's rate limit (the plan's limit, not the proxy; the session retries)", n, who))
+		case x.Error == "context_too_long":
+			parts = append(parts, fmt.Sprintf("%s to %s did not fit the model's context window; the session was told so, and compacts", n, who))
+			if fix == "" {
+				fix = "in a session that stays stuck: /compact, or /model to a model with a larger window and then /compact"
+			}
 		case x.Status == 401 || x.Status == 403:
 			level = FindingFail
 			parts = append(parts, fmt.Sprintf("%s: %s refused the login (%d)", n, who, x.Status))
