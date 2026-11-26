@@ -291,7 +291,7 @@ func TestSetup_HealthyChangesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d := decodeSetup(t, jout); len(d.Steps) != 0 || len(d.Approved) != 0 || len(d.Summary) != 6 || d.SchemaVersion != "1" {
+	if d := decodeSetup(t, jout); len(d.Steps) != 0 || len(d.Approved) != 0 || len(d.Summary) != 6 || d.SchemaVersion != "2" {
 		t.Fatalf("doc = %+v", d)
 	}
 	r.tty = true
@@ -406,7 +406,7 @@ func TestSetup_YesRunsMissingStepsThenSecondRunChangesNothing(t *testing.T) {
 func TestSetup_TTYAsksPerStep(t *testing.T) {
 	r := newFrontRig(t)
 	r.m.imagePresent = false
-	r.tty, r.input = true, "n\n"
+	r.tty, r.input = true, "\nn\n" // the parts menu: none; then the step
 	out, errOut, err := r.setup(t)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, errOut)
@@ -424,7 +424,7 @@ func TestSetup_TTYAsksPerStep(t *testing.T) {
 	if len(r.f.find("podman", "build")) != 0 {
 		t.Fatalf("EOF ran the step: %v", r.f.calls)
 	}
-	r.input = "\n" // Enter is yes
+	r.input = "\n\n" // the parts menu: none; then Enter is yes
 	if _, _, err := r.setup(t); err != nil {
 		t.Fatal(err)
 	}
@@ -455,7 +455,7 @@ func TestSetup_NeverApprovesWithoutExplicitYesOnATerminal(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			r := newFrontRig(t)
 			r.changeTools()
-			r.tty, r.input = c.tty, "y\ny\ny\ny\n"
+			r.tty, r.input = c.tty, "\ny\ny\ny\ny\n"
 			before := r.pins(t)
 			out, errOut, err := r.setup(t, c.args...)
 			if err != nil {
@@ -480,7 +480,7 @@ func TestSetup_TTYApprovesOnlyExplicitYesPerTool(t *testing.T) {
 	r := newFrontRig(t)
 	r.changeTools()
 	r.tty = true
-	r.input = "y\ny\ny\n\n" // jira: diff yes, approve yes; slack: diff yes, approve Enter (no)
+	r.input = "\ny\ny\ny\n\n" // the parts menu: none; jira: diff yes, approve yes; slack: diff yes, approve Enter (no)
 	out, errOut, err := r.setup(t, "--yes")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, errOut)
@@ -517,7 +517,7 @@ func toolsStatusOf(t *testing.T, r *frontRig) map[string]string {
 func TestSetup_TTYEOFApprovesNothing(t *testing.T) {
 	r := newFrontRig(t)
 	r.changeTools()
-	r.tty, r.input = true, "y\n"
+	r.tty, r.input = true, "\ny\n"
 	before := r.pins(t)
 	if _, _, err := r.setup(t); err != nil {
 		t.Fatal(err)
