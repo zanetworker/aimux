@@ -345,9 +345,12 @@ func serveForwardedMessage(w http.ResponseWriter, r, out *http.Request, path str
 		Effort: ledgerID(request.OutputConfig.Effort), Status: timing.status, TTFB: timing.firstByte,
 		Duration: time.Since(timing.started), Usage: result.Usage, Error: failure,
 	})
+	if result.AllowanceKnown {
+		config.allowances.note(name, result.Allowance, time.Now())
+	}
 	if call != nil {
 		finishModelCall(call, timing.started, timing.firstByte, result.Usage, failure, timing.status)
-		call.ResponseModel, call.UsageUnknown = ledgerModel(result.Model), !result.UsageKnown
+		call.ResponseModel, call.UsageUnknown, call.Limit = ledgerModel(result.Model), !result.UsageKnown, result.Limit
 		config.ledger.Write(*call)
 	}
 	return result

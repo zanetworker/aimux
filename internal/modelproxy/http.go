@@ -27,6 +27,8 @@ type handlerConfig struct {
 	turns     *turns
 	anthropic *anthropicEngine // nil: every request is answered by Codex, as before there was a second engine
 	upstreams map[string]*namedUpstream
+	// allowances is the plan allowance last seen in each engine's answers.
+	allowances *allowances
 }
 
 // WithRequestLog records one line per answered request, for `aimux model proxy stats`.
@@ -35,7 +37,7 @@ func WithRequestLog(log *RequestLog) HandlerOption {
 }
 
 func NewHandler(backend Backend, key string, options ...HandlerOption) http.Handler {
-	config := handlerConfig{turns: &turns{}}
+	config := handlerConfig{turns: &turns{}, allowances: &allowances{}}
 	for _, option := range options {
 		option(&config)
 	}
@@ -54,6 +56,7 @@ func NewHandler(backend Backend, key string, options ...HandlerOption) http.Hand
 			health := reporter.health()
 			stats := config.ledger.Stats()
 			health.Ledger = LedgerHealth{Seq: stats.Seq, Failed: stats.Failed, Off: config.ledgerOff}
+			health.Allowance = config.allowances.list()
 			status := http.StatusOK
 			if health.Status != "ok" {
 				status = http.StatusServiceUnavailable
