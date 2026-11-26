@@ -480,19 +480,22 @@ func browserSetup(ctx context.Context, env browserEnv, sandboxDir string, accept
 // and returns the registry.
 func setupToolSources(home string, say func(string, ...any)) (toolreg.Registry, error) {
 	path, old := toolreg.DefaultPath(home), toolreg.LegacyPath(home)
-	m, err := toolreg.MigrateReport(old, path)
-	if err != nil {
-		return toolreg.Registry{}, err
-	}
-	if m.Migrated {
-		say("Migrated %s to %s (the old file is kept as %s.migrated)", old, path, old)
-		for _, d := range m.Dropped {
-			say("Migrated tool config to %s; %s", path, d)
+	// A registry in its newer form (servers.yaml) is read from there: nothing is migrated or written beside it.
+	if _, err := os.Lstat(toolreg.ServersPath(home)); err != nil {
+		m, err := toolreg.MigrateReport(old, path)
+		if err != nil {
+			return toolreg.Registry{}, err
 		}
-	} else if err := toolreg.WriteNew(path, toolreg.Default()); err == nil {
-		say("Wrote %s", path)
-	} else if !errors.Is(err, fs.ErrExist) {
-		return toolreg.Registry{}, err
+		if m.Migrated {
+			say("Migrated %s to %s (the old file is kept as %s.migrated)", old, path, old)
+			for _, d := range m.Dropped {
+				say("Migrated tool config to %s; %s", path, d)
+			}
+		} else if err := toolreg.WriteNew(path, toolreg.Default()); err == nil {
+			say("Wrote %s", path)
+		} else if !errors.Is(err, fs.ErrExist) {
+			return toolreg.Registry{}, err
+		}
 	}
 	reg, err := toolreg.Load(path)
 	if err != nil {

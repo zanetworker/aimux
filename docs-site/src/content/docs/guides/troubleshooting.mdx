@@ -18,7 +18,7 @@ To fix what is missing in one go, run `aimux setup` (see [below](#aimux-setup)).
 
 | Check id | Status | Problem | Fix |
 |---|---|---|---|
-| `tools.legacy` | warn | `tool-sources.yaml` is absent and `~/.aimux/wingman/readonly.json` is not migrated yet (doctor reports it even when `servers.yaml` is in use; the split files are what is read then). | `aimux setup --yes (migrates it once; the old file is kept as readonly.json.migrated)` |
+| `tools.legacy` | warn | `tool-sources.yaml` is absent and `~/.aimux/wingman/readonly.json` is not migrated yet. Not reported when `servers.yaml` is in use: the newer files are what is read, and there is nothing for setup to migrate. | `aimux setup --yes (migrates it once; the old file is kept as readonly.json.migrated)` |
 | `tools.pins` | fail | `~/.aimux/tools/pins.json` does not read. Until it is fixed no tool is granted or served. | `move ~/.aimux/tools/pins.json aside, then aimux tools diff and aimux tools approve <set> for each set you review` |
 | `tools.registry` | fail | The registry does not load at all (strict YAML: an unknown key, a second document, a wrong version); after migration, the error names `servers.yaml` or `tool-sets.yaml`, the file to fix. The other tools checks are skipped. | `fix <registry> (strict YAML; aimux tools status shows the same error)` |
 | `tools.registry.set.<set>` | warn | One set is malformed or points at an unknown or broken source, so it is skipped. With `servers.yaml`, also a set whose server runs a floating command (`floating command; pin a version or a built binary`), whose program cannot be found or hashed (`identity: ...`; fix the server's `command`, `cwd` or `env: PATH`), or that aimux would start itself (`managed server: approval waits until aimux runs it ...`; held for now). The detail names the profiles that request it. | `fix set <set> in <registry>, then aimux tools status` |
@@ -85,7 +85,7 @@ On a terminal `aimux setup` opens with the parts aimux is made of, one line each
 
 The rest belongs to one part, Sandboxes. With `sandboxes: enabled: false` in the file none of it runs and setup says so; when the file says nothing about Sandboxes it runs as it always did. `aimux setup` checks the same concerns as `aimux doctor` and runs only the steps that are missing:
 
-1. The tool registry: migrates `readonly.json` once, or writes the defaults.
+1. The tool registry: migrates `readonly.json` once, or writes the defaults. Not when the registry is already in its newer form (`~/.config/aimux/servers.yaml`, after `aimux servers migrate`): it is read from there and no `tool-sources.yaml` is written.
 2. `~/.config/aimux/clients.yaml`, when it is absent.
 3. The sandbox: starts the OpenShell gateway, builds the image and creates the provider, each only when missing (as `aimux sandbox setup`). It runs only when one of those is missing; to build the tool runner image `localhost/aimux-tools:2.103.3` and create `aimux-github`, run `aimux sandbox setup`.
 4. The Chrome native host (as `aimux browser install`), with `--extension-id <id>`, or when an id is already pinned but no host manifest or wrapper is there.

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/zanetworker/aimux/internal/parts"
+	"github.com/zanetworker/aimux/internal/toolreg"
 )
 
 func menuConfig(t *testing.T, r *frontRig) string {
@@ -197,4 +198,61 @@ func TestSetupMenu_AnAmbiguousSandboxesSettingSkipsNothing(t *testing.T) {
 		t.Fatalf("%v\nout:\n%s\nerr:\n%s", err, out, errOut)
 	}
 	summaryLines(t, out)
+}
+
+// A registry already in its newer form (servers.yaml) has no tool-sources.yaml, and needs none written.
+func TestSetup_NoRegistryStepWhenServersYamlExists(t *testing.T) {
+	r := newFrontRig(t)
+	old := toolreg.DefaultPath(r.env.Home)
+	if err := toolreg.MigrateSplit(filepath.Dir(old)); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Remove(old)
+	if _, err := os.Stat(toolreg.ServersPath(r.env.Home)); err != nil {
+		t.Fatalf("the rig has no servers.yaml after the migration: %v", err)
+	}
+	out, _, err := r.setup(t, "--yes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, statErr := os.Stat(old); statErr == nil || strings.Contains(out, "tool registry") {
+		t.Fatalf("setup wrote or offered the old registry file (%v):\n%s", statErr, out)
+	}
+}
+
+// aimux browser setup goes through the same function: it writes no old file beside a servers.yaml either.
+func TestSetupToolSources_WritesNothingBesideServersYaml(t *testing.T) {
+	r := newFrontRig(t)
+	old := toolreg.DefaultPath(r.env.Home)
+	if err := toolreg.MigrateSplit(filepath.Dir(old)); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Remove(old)
+	reg, err := setupToolSources(r.env.Home, func(string, ...any) {})
+	if _, statErr := os.Stat(old); err != nil || statErr == nil || len(reg.Sets) != 4 {
+		t.Fatalf("err %v, old file %v, %d sets", err, statErr, len(reg.Sets))
+	}
+}
+
+// An old readonly.json beside a servers.yaml is not waiting for anything: the newer files are what is read.
+func TestLegacyRegistryWaiting_NotBesideServersYaml(t *testing.T) {
+	r := newFrontRig(t)
+	old := toolreg.DefaultPath(r.env.Home)
+	if err := os.WriteFile(toolreg.LegacyPath(r.env.Home), []byte(legacyFrontJSON(r.env.Home)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := toolreg.MigrateSplit(filepath.Dir(old)); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Remove(old)
+	if _, note, err := readRegistry(r.env.Home); err != nil || note != "" || legacyRegistryWaiting(r.env.Home) {
+		t.Fatalf("note %q, err %v", note, err)
+	}
+	// Without the newer files it is waiting, as before.
+	if err := os.Remove(toolreg.ServersPath(r.env.Home)); err != nil {
+		t.Fatal(err)
+	}
+	if !legacyRegistryWaiting(r.env.Home) {
+		t.Fatal("an old file with nothing newer is not reported as waiting")
+	}
 }

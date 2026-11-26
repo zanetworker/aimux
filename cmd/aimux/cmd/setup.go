@@ -502,7 +502,9 @@ func sandboxPrepare(sb sandboxReport) []string {
 func missingSteps(env frontEnv, o setupOpts, sb sandboxReport) []setupStep {
 	home := env.Home
 	var steps []setupStep
-	if _, err := os.Lstat(toolreg.DefaultPath(home)); errors.Is(err, fs.ErrNotExist) {
+	// A registry in its newer form (servers.yaml) is read from there, and has no tool-sources.yaml to write.
+	_, split := os.Lstat(toolreg.ServersPath(home))
+	if _, err := os.Lstat(toolreg.DefaultPath(home)); errors.Is(err, fs.ErrNotExist) && split != nil {
 		desc := "Write the default tool registry " + toolreg.DefaultPath(home)
 		if _, err := os.Stat(toolreg.LegacyPath(home)); err == nil {
 			desc = "Migrate " + toolreg.LegacyPath(home) + " to " + toolreg.DefaultPath(home) + " (the old file is kept)"
