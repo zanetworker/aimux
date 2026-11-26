@@ -245,3 +245,31 @@ func TestMeter_NamesTheEngines(t *testing.T) {
 		t.Fatalf("by model: %v, %+v", err, byModel.Rows)
 	}
 }
+
+// By role the rows are the kinds of work. A line written before the role was recorded is read by the same rule
+// from what it does hold: a subagent's id, and whether it was off the main conversation.
+func TestMeter_ByRole(t *testing.T) {
+	withRole := func(l ledger.Line, role string) ledger.Line { l.Role = role; return l }
+	older := func(l ledger.Line, side bool, agent string) ledger.Line { l.Side, l.Agent = side, agent; return l }
+	dir := meterLedger(t,
+		withRole(modelCall("a", meterDay, "claude-opus-5-5", "claude-opus-5-5", 1000, 0, 100, ledger.OutcomeOK), "main"),
+		withRole(modelCall("a", meterDay, "codex:gpt-6.2-sol", "codex:gpt-6.2-sol", 100, 0, 10, ledger.OutcomeOK), "subagent"),
+		older(modelCall("b", meterDay, "codex:gpt-6.2-sol", "codex:gpt-6.2-sol", 100, 0, 10, ledger.OutcomeOK), true, "a3000b5e"),
+		older(modelCall("c", meterDay, "claude-opus-5-5", "claude-opus-5-5", 50, 0, 5, ledger.OutcomeOK), false, ""),
+		older(modelCall("d", meterDay, "claude-haiku-5-5", "claude-haiku-5-5", 20, 0, 2, ledger.OutcomeOK), true, ""),
+	)
+	got, err := Meter(dir, MeterOptions{By: MeterByRole})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := map[string]MeterRow{}
+	for _, r := range got.Rows {
+		rows[r.Key] = r
+	}
+	if len(got.Rows) != 3 || rows["main"].Requests != 2 || rows["subagent"].Requests != 2 || rows["background"].Requests != 1 || got.Total.Requests != 5 {
+		t.Fatalf("rows %+v", got.Rows)
+	}
+	if !slices.Equal(rows["subagent"].Models, []string{"codex:gpt-6.2-sol"}) {
+		t.Errorf("subagent row %+v", rows["subagent"])
+	}
+}

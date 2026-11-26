@@ -18,7 +18,22 @@ const (
 	MeterBySession MeterBy = "session"
 	MeterByModel   MeterBy = "model"
 	MeterByDay     MeterBy = "day"
+	MeterByRole    MeterBy = "role"
 )
+
+// lineRole is the role of a model call. A line written before the role was recorded holds the two facts the role
+// is decided from, and by the same rule: a subagent's id, and whether the call was off the main conversation.
+func lineRole(l ledger.Line) string {
+	switch {
+	case l.Role != "":
+		return l.Role
+	case l.Agent != "":
+		return "subagent"
+	case l.Side:
+		return "background"
+	}
+	return "main"
+}
 
 // MeterOptions narrows and groups what the meter counts.
 type MeterOptions struct {
@@ -122,6 +137,8 @@ func Meter(dir string, opts MeterOptions) (MeterReport, error) {
 			key = l.ResponseModel
 		case MeterByDay:
 			key = l.At.In(zone).Format("2006-01-02")
+		case MeterByRole:
+			key = lineRole(l)
 		}
 		row := rows[key]
 		if row == nil {

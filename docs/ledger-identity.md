@@ -71,4 +71,6 @@ A writer continues its numbering from the last line on disk. A write that fails 
 
 `gen_ai.usage.input_tokens` is the whole prompt, as OpenTelemetry defines it; the part read from a cache is included in it and also given on its own as `aimux.usage.cache_read_input_tokens`. Only one process may have a ledger file open for writing; a second is refused.
 
+A model call carries `aimux.role`, the kind of work it was: `main`, `subagent` or `background`. It is decided from the facts of the call (its session, a subagent's id, whether the request itself named the session), never from the model named, and a request does not say which kind of subagent sent it. `aimux.side` stays, true for the two that are not `main`. A line written before roles has no `aimux.role`; a reader gets its role by the same rule from `aimux.agent` and `aimux.side`, which it does have.
+
 A model call that failed carries `http.response.status_code`, the status the session was given: 429 for a rate limit, 401 for a refused login, 502 when the proxy itself had to answer for an engine that gave none. It is absent on a call that succeeded and on one that ended before any answer; `aimux.outcome` still holds the writer's own word for what went wrong. The field is an addition to schema 1: a reader that does not know it ignores it.

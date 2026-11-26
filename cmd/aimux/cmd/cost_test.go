@@ -128,7 +128,7 @@ func TestCostOptions(t *testing.T) {
 			t.Errorf("--since %s: %v, %v; want %v", since, opts.Since, err, want)
 		}
 	}
-	if _, err := costOptions("24h", "week", "", now); err == nil || !strings.Contains(err.Error(), "session, model or day") {
+	if _, err := costOptions("24h", "week", "", now); err == nil || !strings.Contains(err.Error(), "session, model, day or role") {
 		t.Fatalf("--by week: %v", err)
 	}
 	for _, bad := range []string{"soon", "-3h", "0", "99999999d"} {
@@ -146,5 +146,24 @@ func TestCostCount(t *testing.T) {
 		if got := costCount(n); got != want {
 			t.Errorf("costCount(%d) = %q, want %q", n, got, want)
 		}
+	}
+}
+
+// By role the rows are kinds of work.
+func TestCost_ByRole(t *testing.T) {
+	report := controller.MeterReport{Rows: []controller.MeterRow{
+		{Key: "main", Requests: 3, InputTokens: 30, OutputTokens: 9, Models: []string{"claude-opus-5-5"}},
+		{Key: "subagent", Requests: 2, InputTokens: 10, OutputTokens: 5, Models: []string{"codex:gpt-6.2-sol"}},
+	}, Total: controller.MeterRow{Requests: 5, InputTokens: 40, OutputTokens: 14}}
+	var out bytes.Buffer
+	_ = writeCost(&out, report, controller.MeterByRole, "7d", false)
+	got := out.String()
+	for _, want := range []string{"ROLE ", "main", "subagent", "codex:gpt-6.2-sol"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("no %q in:\n%s", want, got)
+		}
+	}
+	if _, err := costOptions("7d", "role", "", time.Now()); err != nil {
+		t.Errorf("--by role refused: %v", err)
 	}
 }

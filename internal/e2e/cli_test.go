@@ -234,7 +234,7 @@ func TestCostJSON(t *testing.T) {
 
 func TestCostBadBy(t *testing.T) {
 	out, err := exec.Command(binaryPath, "cost", "--by", "week").CombinedOutput()
-	if err == nil || !strings.Contains(string(out), "session, model or day") {
+	if err == nil || !strings.Contains(string(out), "session, model, day or role") {
 		t.Fatalf("cost --by week: %v\n%s", err, out)
 	}
 }

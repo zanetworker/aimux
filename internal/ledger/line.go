@@ -45,8 +45,11 @@ type Line struct {
 	Secondary bool      `json:"secondary,omitempty"` // a cross-check, not the record
 
 	Harness string `json:"aimux.harness,omitempty"` // "claude-code", "codex"
-	Side    bool   `json:"aimux.side,omitempty"`    // off the session's main conversation: a subagent or background call
-	Agent   string `json:"aimux.agent,omitempty"`   // the subagent's id, as the harness names it
+	// Role is the kind of work a model call was: "main" (the session's main conversation), "subagent" or
+	// "background". A line written before roles were recorded has none.
+	Role  string `json:"aimux.role,omitempty"`
+	Side  bool   `json:"aimux.side,omitempty"`  // off the session's main conversation: a subagent or background call
+	Agent string `json:"aimux.agent,omitempty"` // the subagent's id, as the harness names it
 
 	// A model call.
 	RequestModel  string `json:"gen_ai.request.model,omitempty"`  // the model the client named

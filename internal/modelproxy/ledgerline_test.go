@@ -79,7 +79,7 @@ func TestLedger_OneLinePerAnsweredRequest(t *testing.T) {
 	got := lines[0]
 	want := ledger.Line{
 		Schema: ledger.Schema, SemConv: ledger.SemConv, Writer: "model-proxy", Seq: 1, At: got.At, Kind: ledger.KindModelCall,
-		Session: "0b61f1d5-full-session-id", Turn: "1", Call: got.Call, Harness: "claude-code",
+		Session: "0b61f1d5-full-session-id", Turn: "1", Call: got.Call, Harness: "claude-code", Role: RoleMain,
 		RequestModel: "claude-sonnet-5-5", ResponseModel: "codex:" + defaultModel, Engine: "codex", Effort: got.Effort,
 		InputTokens: 17, OutputTokens: 3, TTFBMillis: got.TTFBMillis, DurationMs: got.DurationMs, Outcome: ledger.OutcomeOK,
 	}

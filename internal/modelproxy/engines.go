@@ -292,7 +292,7 @@ func serveForwardedMessage(w http.ResponseWriter, r, out *http.Request, path str
 	var call *ledger.Line
 	if config.ledger != nil {
 		var change *ledger.Line
-		call, change = startModelCall(config.turns, r, request, name, "", request.OutputConfig.Effort)
+		call, change = startModelCall(config.turns, callFactsOfMessages(r, request, request.OutputConfig.Effort), name, "")
 		if change != nil {
 			config.ledger.Write(*change)
 		}
