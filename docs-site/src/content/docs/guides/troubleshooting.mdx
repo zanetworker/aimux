@@ -92,7 +92,7 @@ The rest belongs to one part, Sandboxes. With `sandboxes: enabled: false` in the
 
 On a terminal it asks before each step (Enter is yes); `--yes` runs them without asking. With no terminal, or with `--json`, and no `--yes`, it runs none and lists them as `pending` with `Next: aimux setup --yes`.
 
-Then, only on a terminal and never with `--json`, it offers each tool that needs review: `Show diff and approve now? [y/N]` shows the diff, and a second yes to `Approve <set>/<tool>? [y/N]` pins it. Anything else, and end of input, is no. `--yes` never approves tools.
+Setup never approves a tool and never asks to. Tools that need review are counted on the `tools` line, with `Next: aimux tools review`: that command walks through them on a terminal, showing each tool's diff and asking `Approve <set>/<tool>? [y/N/a]` (`a` approves that one and all the rest).
 
 It ends with six lines, one per concern (`sandbox`, `tools`, `router`, `browser`, `gateway`, `worker` for the tool gateway worker), each `✓` (fine), `!` (works, but needs attention) or `✗` (broken), and a `Next:` line on stderr for each problem. A second run with nothing missing changes nothing. Plain `aimux setup` exits 1 only when a step failed or a part chosen from the list could not be turned on. `aimux setup --check` is a different thing: it compares the services with the `parts:` section of the config file and exits 1 when `--apply` would change something ([guide](/guides/parts/)).
 

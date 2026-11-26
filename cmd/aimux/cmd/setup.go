@@ -120,8 +120,7 @@ func newSetupCmdWith(env frontEnv) *cobra.Command {
 			"provider, and the Chrome native host (with --extension-id, or when an id is pinned but the host is\n" +
 			"not registered). On a terminal it asks before each step; --yes runs them without asking; with no\n" +
 			"terminal (or --json) and no --yes it runs none and lists them as pending.\n" +
-			"Tools that need review are offered one by one, only on a terminal and never with --json: a tool is\n" +
-			"approved only after you answer yes to its diff and yes to approving it. --yes never approves tools.\n" +
+			"Tools that need review are counted, never approved here: aimux tools review walks through them.\n" +
 			"Ends with one line per concern (sandbox, tools, router, browser, gateway, worker: the tool gateway worker) and a Next: line per problem.\n" +
 			"Exit 0 unless a step failed or a part chosen from the list could not be turned on.\n\n" +
 			"With --check or --apply it does something else: it compares the background services with the parts\n" +
@@ -315,15 +314,6 @@ func runSetup(ctx context.Context, env frontEnv, o setupOpts, out, errOut io.Wri
 	var st []toolgateway.ToolStatus
 	if rvErr == nil {
 		st = toolgateway.Review(rv.reg, rv.pins, rv.live)
-		if interactive {
-			pins, names, err := reviewOnTerminal(in, out, rv, st, env.Now())
-			if err != nil {
-				return err
-			}
-			approved = names
-			rv.pins = pins
-			st = toolgateway.Review(rv.reg, rv.pins, rv.live)
-		}
 	}
 
 	// Approvals can change what the runner needs (a first gh tool needs
@@ -566,20 +556,34 @@ func ask(in *bufio.Reader, out io.Writer, prompt string, def bool) bool {
 	return false
 }
 
-// reviewOnTerminal offers each tool that needs review: a yes shows its
-// diff, and only a second yes approves it. The approved tools are pinned
-// in one save. It returns the pins after and the approved set/tool names.
+// reviewOnTerminal shows each tool that needs review with its diff and asks whether to approve it: y approves
+// that one, a approves it and every one after it (each still shown), anything else leaves it. The approved tools
+// are pinned in one save. It returns the pins after and the approved set/tool names.
 func reviewOnTerminal(in *bufio.Reader, out io.Writer, rv toolsReview, st []toolgateway.ToolStatus, now time.Time) (toolgateway.PinFile, []string, error) {
 	changes := toolgateway.Diff(rv.reg, rv.pins, rv.live)
-	var targets []string
+	// One approval covers a tool of a source in every set that lists it, so it is asked about once, with all of
+	// them named: a no to one set could otherwise be undone by a yes to another.
+	type shared struct {
+		first   toolgateway.ToolStatus
+		targets []string
+	}
+	var order []string
+	bySource := map[string]*shared{}
 	for _, s := range st {
 		if !s.NeedsReview() {
 			continue
 		}
-		target := s.Set + "/" + s.Tool
-		if !ask(in, out, fmt.Sprintf("%s %s: Show diff and approve now? [y/N] ", s.Status, target), false) {
-			continue
+		key := rv.reg.Sets[s.Set].Source + "\x00" + s.Tool
+		if bySource[key] == nil {
+			bySource[key] = &shared{first: s}
+			order = append(order, key)
 		}
+		bySource[key].targets = append(bySource[key].targets, s.Set+"/"+s.Tool)
+	}
+	var targets []string
+	rest := false
+	for _, key := range order {
+		s, names := bySource[key].first, strings.Join(bySource[key].targets, ", ")
 		var mine []toolgateway.Change
 		for _, c := range changes {
 			if c.Set == s.Set && c.Tool == s.Tool {
@@ -587,12 +591,24 @@ func reviewOnTerminal(in *bufio.Reader, out io.Writer, rv toolsReview, st []tool
 			}
 		}
 		if len(mine) == 0 {
-			_, _ = fmt.Fprintf(out, "%s %s\n  %s\n", s.Status, target, s.Reason)
+			_, _ = fmt.Fprintf(out, "%s %s\n  %s\n", s.Status, names, s.Reason)
 		}
 		printChanges(out, mine)
-		if ask(in, out, "Approve "+target+"? [y/N] ", false) {
-			targets = append(targets, target)
+		if !rest {
+			_, _ = fmt.Fprintf(out, "Approve %s? [y/N/a] ", names)
+			line, err := in.ReadString('\n')
+			if err != nil && line == "" {
+				_, _ = fmt.Fprintln(out)
+			}
+			switch strings.ToLower(strings.TrimSpace(line)) {
+			case "a", "all":
+				rest = true
+			case "y", "yes":
+			default:
+				continue
+			}
 		}
+		targets = append(targets, bySource[key].targets...)
 	}
 	if len(targets) == 0 {
 		return rv.pins, []string{}, nil
@@ -607,6 +623,8 @@ func reviewOnTerminal(in *bufio.Reader, out io.Writer, rv toolsReview, st []tool
 		case toolgateway.ActionApproved, toolgateway.ActionUpgraded, toolgateway.ActionUnchanged:
 			names = append(names, a.Set+"/"+a.Tool)
 			_, _ = fmt.Fprintf(out, "Approved %s/%s\n", a.Set, a.Tool)
+		case toolgateway.ActionRemoved:
+			_, _ = fmt.Fprintf(out, "Removed %s/%s (its source no longer lists it)\n", a.Set, a.Tool)
 		case toolgateway.ActionSkipped:
 			_, _ = fmt.Fprintf(out, "Not approved %s/%s (%s)\n", a.Set, a.Tool, a.Reason)
 		}
@@ -693,7 +711,7 @@ func toolsSummary(rv toolsReview, st []toolgateway.ToolStatus, err error) summar
 	}
 	if len(need) > 0 {
 		problems = append(problems, fmt.Sprintf("%s review: %s", plural(len(need), "tool needs", "tools need"), strings.Join(need, ", ")))
-		l.Next = append(l.Next, "aimux tools diff, then aimux tools approve "+strings.Join(reviewSets(st), " ")+" (or run aimux setup on a terminal)")
+		l.Next = append(l.Next, "aimux tools review (on a terminal; or aimux tools diff, then aimux tools approve "+strings.Join(reviewSets(st), " ")+")")
 	}
 	for _, n := range slices.Sorted(maps.Keys(rv.live)) {
 		if rv.live[n].Err != nil {

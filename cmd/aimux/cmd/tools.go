@@ -128,7 +128,20 @@ func newToolsCmdWith(env toolsEnv) *cobra.Command {
 	approve.Flags().BoolVar(&all, "all", false, "Approve every tool of every set")
 	approve.Flags().StringVar(&addToSet, "add-to-set", "", "Add <source>/<tool>, a tool the source offers that no set lists, to this set, then pin it (shows its definition first)")
 	approve.Flags().StringVar(&expect, "expect", "", "Refuse unless the live definition's hash starts with this one (12 or more hex digits, as diff prints it)")
-	cmd.AddCommand(status, diff, approve, newToolsAddCmd(env), newToolsRemoveCmd(env))
+	review := &cobra.Command{
+		Use:   "review",
+		Short: "Walk through the tools that need review: each one's diff, then approve it or not",
+		Long: "For each tool whose live definition is not the approved one, in turn: what changed, field by field, then\n" +
+			"Approve <set>/<tool>? [y/N/a]. y approves that tool, a approves it and every one after it (each is still\n" +
+			"shown), and anything else, the end of input included, leaves it as it is. The approved tools are pinned in one\n" +
+			"save at the end. It needs a terminal: elsewhere, and with --json, use aimux tools diff and aimux tools approve.",
+		Args: cobra.NoArgs,
+		RunE: func(c *cobra.Command, _ []string) error {
+			c.SilenceUsage = true
+			return toolsReviewRun(c.Context(), env, c.OutOrStdout())
+		},
+	}
+	cmd.AddCommand(status, diff, approve, review, newToolsAddCmd(env), newToolsRemoveCmd(env))
 	return cmd
 }
 
@@ -955,4 +968,41 @@ func toolsApproveIntoSet(ctx context.Context, env toolsEnv, target, set string, 
 		return fmt.Errorf("%w; tool-sources.yaml was not put back (%v): remove %s from %s by hand", aerr, err, tool, set)
 	}
 	return aerr
+}
+
+// toolsReviewRun is `aimux tools review`: the terminal walk through the tools that need review.
+func toolsReviewRun(ctx context.Context, env toolsEnv, out io.Writer) error {
+	if jsonOutput || env.IsTTY == nil || !env.IsTTY() || env.In == nil {
+		return errors.New("aimux tools review asks about each tool, so it needs a terminal and no --json; without one: aimux tools diff, then aimux tools approve <set>")
+	}
+	rv, err := loadToolsReview(ctx, env)
+	if err != nil {
+		return err
+	}
+	st := toolgateway.Review(rv.reg, rv.pins, rv.live)
+	// A source that could not be listed was not checked: said, so a short review is not read as a clean one.
+	for _, n := range slices.Sorted(maps.Keys(rv.live)) {
+		if rv.live[n].Err != nil {
+			_, _ = fmt.Fprintf(out, "Not checked: source %s could not be listed (%v); see aimux tools status\n", n, rv.live[n].Err)
+		}
+	}
+	if !slices.ContainsFunc(st, toolgateway.ToolStatus.NeedsReview) {
+		_, _ = fmt.Fprintln(out, "Nothing to review: every tool that could be listed is as it was approved.")
+		return nil
+	}
+	pins, _, err := reviewOnTerminal(bufio.NewReader(env.In()), out, rv, st, env.Now())
+	if err != nil {
+		return err
+	}
+	rv.pins = pins
+	left := 0
+	for _, s := range toolgateway.Review(rv.reg, rv.pins, rv.live) {
+		if s.NeedsReview() {
+			left++
+		}
+	}
+	if left > 0 {
+		_, _ = fmt.Fprintf(out, "%s review.\n", plural(left, "tool still needs", "tools still need"))
+	}
+	return nil
 }
