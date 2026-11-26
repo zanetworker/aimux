@@ -97,8 +97,12 @@ func ledgerModel(name string) string {
 }
 
 // finishModelCall adds how the call went. failure is the request history's word for what went wrong, or empty.
-func finishModelCall(call *ledger.Line, started time.Time, firstByte time.Duration, usage Usage, failure string) {
+// status is what the session was given, and is kept only for a call that failed.
+func finishModelCall(call *ledger.Line, started time.Time, firstByte time.Duration, usage Usage, failure string, status int) {
 	call.At = started
+	if failure != "" && status >= 400 {
+		call.Status = status
+	}
 	// The ledger's input tokens are the whole prompt; the proxy's usage keeps the cached parts apart.
 	call.InputTokens = int64(usage.InputTokens) + int64(usage.CacheReadInputTokens) + int64(usage.CacheCreationInputTokens)
 	call.CacheRead = int64(usage.CacheReadInputTokens)

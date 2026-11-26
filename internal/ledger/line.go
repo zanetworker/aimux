@@ -65,6 +65,9 @@ type Line struct {
 	TTFBMillis   int64  `json:"aimux.ttfb_ms,omitempty"` // -1: no byte was sent
 	DurationMs   int64  `json:"aimux.duration_ms,omitempty"`
 	Outcome      string `json:"aimux.outcome,omitempty"`
+	// Status is the HTTP status the session was given for a call that failed: 429 for a rate limit, 401 for a
+	// refused login. Absent for a call that succeeded, and for one that ended before any answer.
+	Status int `json:"http.response.status_code,omitempty"`
 
 	// A switch: the session's main conversation was answered by another engine than the time before.
 	FromEngine string `json:"aimux.from_engine,omitempty"`

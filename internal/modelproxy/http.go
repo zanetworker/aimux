@@ -191,7 +191,7 @@ func serveMessage(w http.ResponseWriter, r *http.Request, backend Backend, confi
 				Usage: usage, Error: failure,
 			})
 			if call != nil {
-				finishModelCall(call, timing.started, timing.firstByte, usage, failure)
+				finishModelCall(call, timing.started, timing.firstByte, usage, failure, timing.status)
 				config.ledger.Write(*call)
 			}
 		}()
