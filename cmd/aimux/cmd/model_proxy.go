@@ -137,7 +137,8 @@ func newModelProxyStatusCmd() *cobra.Command {
 		Use:   "status",
 		Short: "Show whether the model proxy is answering, and how its last turn and Codex check went",
 		Long: "Reads the running proxy's /health on 127.0.0.1 and prints: the proxy's own state and uptime, whether " +
-			"its Codex app-server is running, how many turns it has sent to Codex and how the last one went, and the " +
+			"its Codex app-server is running, how many turns it has sent to Codex and how the last one went, how many " +
+			"calls it passed on to each other engine since it started (from its request history), and the " +
 			"same for the rate-limit checks behind the HUD's usage file (they cost no tokens, so a recent one proves " +
 			"the Codex login still works). Nothing here starts Codex or spends tokens. Exits non-zero when the proxy " +
 			"is degraded or not running, so a monitor can act on the exit code.",
@@ -152,7 +153,11 @@ func newModelProxyStatusCmd() *cobra.Command {
 				return fmt.Errorf("read the model proxy key: %w", err)
 			}
 			addr := fmt.Sprintf("127.0.0.1:%d", port)
-			return modelProxyStatus(cmd.Context(), addr, key, cmd.OutOrStdout(), time.Now)
+			history := ""
+			if home, err := os.UserHomeDir(); err == nil {
+				history = modelproxy.RequestLogFile(home, port)
+			}
+			return modelProxyStatus(cmd.Context(), addr, key, history, cmd.OutOrStdout(), time.Now)
 		},
 	}
 	cmd.Flags().IntVar(&port, "port", modelproxy.StablePort, "Port the proxy listens on at 127.0.0.1")

@@ -18,7 +18,8 @@ import (
 // modelProxyStatus prints what the proxy at addr reports about itself and fails when it is unwell, so a monitor
 // can act on the exit code alone. It asks for state the proxy already has: nothing here starts Codex or spends
 // tokens.
-func modelProxyStatus(ctx context.Context, addr, key string, out io.Writer, now func() time.Time) error {
+// history is the proxy's request history file, read for the calls it passed on to other engines; empty reads none.
+func modelProxyStatus(ctx context.Context, addr, key, history string, out io.Writer, now func() time.Time) error {
 	health, err := readProxyHealth(ctx, addr, key)
 	if err != nil {
 		var dial *net.OpError
@@ -28,7 +29,13 @@ func modelProxyStatus(ctx context.Context, addr, key string, out io.Writer, now 
 		}
 		return err
 	}
-	writeHealthTable(out, addr, health, now())
+	var passed []modelproxy.PassedOn
+	if history != "" {
+		// What it passed on since it started. A history that cannot be read leaves the row out; the health
+		// answer above is the proxy's own word and does not depend on it.
+		passed, _ = modelproxy.ReadPassedOn(history, health.StartedAt)
+	}
+	writeHealthTable(out, addr, health, passed, now())
 	if health.Status != "ok" {
 		return fmt.Errorf("the model proxy on %s is %s", addr, health.Status)
 	}
@@ -80,7 +87,7 @@ func readProxyHealthOver(ctx context.Context, transport http.RoundTripper, addr,
 	return health, nil
 }
 
-func writeHealthTable(out io.Writer, addr string, health modelproxy.Health, now time.Time) {
+func writeHealthTable(out io.Writer, addr string, health modelproxy.Health, passed []modelproxy.PassedOn, now time.Time) {
 	table := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	uptime := (time.Duration(health.UptimeSeconds) * time.Second).String()
 	_, _ = fmt.Fprintf(table, "Model proxy\t%s\t%s, up %s\n", health.Status, addr, uptime)
@@ -92,7 +99,21 @@ func writeHealthTable(out io.Writer, addr string, health modelproxy.Health, now 
 		codex = "running"
 	}
 	_, _ = fmt.Fprintf(table, "Codex\t%s\t%s\n", codex, health.Codex.Command)
-	_, _ = fmt.Fprintf(table, "Requests\t\t%s\n", stageLine(health.Requests, "turn", now))
+	// The proxy's own counter knows only Codex's turns; what went to another engine is in the request history.
+	_, _ = fmt.Fprintf(table, "Codex turns\t\t%s\n", stageLine(health.Requests, "turn", now))
+	if len(passed) > 0 {
+		total := 0
+		var each []string
+		for _, p := range passed {
+			total += p.Count
+			one := fmt.Sprintf("%s %d", p.Engine, p.Count)
+			if p.Failed > 0 {
+				one += fmt.Sprintf(" (%d failed)", p.Failed)
+			}
+			each = append(each, one)
+		}
+		_, _ = fmt.Fprintf(table, "Passed on\t\t%s since it started: %s\n", plural(total, "call", "calls"), strings.Join(each, ", "))
+	}
 	_, _ = fmt.Fprintf(table, "Codex check\t\t%s\n", stageLine(health.Probe, "read", now))
 	if line := ledgerLine(health.Ledger); line != "" {
 		_, _ = fmt.Fprintf(table, "Ledger\t\t%s\n", line)
