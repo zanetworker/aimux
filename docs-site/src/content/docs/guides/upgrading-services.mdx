@@ -47,6 +47,7 @@ Two limits to know before you run it:
 
 Three things it guards against:
 
+- **A service that is turned off.** A model proxy turned off with `aimux disable inference-proxy` is kept off by launchd, and an upgrade would have to start it. It is skipped with a note and is not counted as a failure; the other services are still upgraded. Naming it (`aimux upgrade model-proxy`) while it is off exits 1. Turn it on, then upgrade it.
 - **Two changes at once.** Only one upgrade of a service runs at a time, and the model proxy is not upgraded while `scripts/model-proxy-promote` is promoting it. The service that is busy is skipped with a note and left as it was; the other service is still upgraded.
 - **An interrupt.** Ctrl-C during the wait puts the previous program back before the command exits.
 - **Being killed.** The program's path never stops existing during the swap, and a build left aside by a killed upgrade is kept as the previous build by the next one.

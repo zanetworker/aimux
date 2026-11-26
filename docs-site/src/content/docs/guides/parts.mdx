@@ -34,7 +34,7 @@ The inference proxy has two sides. `serves` is the front: the APIs a client may 
 
 | Key | Under | Meaning | When left out |
 |---|---|---|---|
-| `enabled` | a part | `true`: aimux manages its service: it takes the job as it is, changes its arguments when the settings ask, and starts it when it is not loaded. `false`: meant to keep it stopped, which is not built yet | Not allowed. A part that is listed says one or the other |
+| `enabled` | a part | `true`: aimux manages its service: it takes the job as it is, changes its arguments when the settings ask, and starts it when it does not run. `false`: for the inference proxy, aimux stops its service and keeps it stopped, through a crash and the next login, until it is turned on again; the MCP proxy is left running and you are pointed at `aimux mcp proxy uninstall`, which also gives Claude Code its servers back | Not allowed. A part that is listed says one or the other |
 | `port` | `inference-proxy` | The port on 127.0.0.1 | What the installed job has |
 | `serves` | `inference-proxy` | The APIs a client may speak; `messages` is the only one this build knows | `[messages]` |
 | `engines` | `inference-proxy` | The engines, by name | What the installed job has |
@@ -47,7 +47,7 @@ The inference proxy has two sides. `serves` is the front: the APIs a client may 
 
 Three rules are worth knowing before you edit it:
 
-- **A part has three states.** Not listed: aimux neither starts nor stops it. `enabled: true`: aimux manages it. `enabled: false`: it should be stopped, which this build reports and does not yet do. Adding one part to the file never touches another.
+- **A part has three states.** Not listed: aimux neither starts nor stops it. `enabled: true`: aimux manages it. `enabled: false`: aimux stops the inference proxy and keeps it stopped; for the MCP proxy it stops nothing and names `aimux mcp proxy uninstall`. Adding one part to the file never touches another.
 - **A setting left out means "as it is installed".** `inference-proxy: {enabled: true}` on a proxy that runs with a port you chose keeps that port. A setting you write replaces the installed one. Engines are stated together: once the file lists engines, they replace the ones the job had, and `engines:` with nothing under it means none besides Codex.
 - **No secret goes in the file.** A key is a reference to where it is kept.
 
@@ -69,7 +69,11 @@ Two verbs for two things. `enable` and `disable` switch something that exists, a
 
 Each command that changes something (all of these but `list`) changes the file, shows what that means for the services, and makes them match, asking before a restart. `--yes` agrees in advance, and `--no-apply` only changes the file, for `aimux setup --apply` to pick up later. If you answer no to the restart, or there is nobody to ask and no `--yes`, the file keeps the change and the service keeps running as it was; the command says so, exits 1, and names `aimux setup --apply` as what applies it. With `--no-apply --json` it prints `{"schema_version": 1, "changed": ..., "applied": false}`.
 
-`aimux disable <part>` records that the part is off. Stopping its service is not built yet, so the service keeps running; the command says that and exits 1, so nothing reads as done that is not. The same holds whenever the file was changed and the machine could not follow: a proxy started by hand, a job file aimux cannot edit, or a part aimux starts and stops nothing for yet (phone access, sandboxes).
+`aimux disable inference-proxy` stops the model proxy, after asking, and tells launchd to keep it off; sessions that go through it get no answer until `aimux enable inference-proxy` starts it again from the same job file, which is not changed. The MCP proxy is more than a job, since Claude Code's server entries point at it, so it is turned off with its own command, `aimux mcp proxy uninstall`, which gives Claude Code its servers back; `aimux disable mcp-proxy` says so and exits 1.
+
+A command about one part or one engine applies only that part: what the file says about another part waits for `aimux setup --apply`, so a stop you staged with `--no-apply` or answered no to is never carried out as a side effect of something else. A proxy that is turned off is skipped by `aimux upgrade`, which says so and still upgrades the others; it is upgraded once it is on again, and naming it on the command line while it is off exits 1. A proxy started by hand, with no job, is not aimux's to stop: the command says it still answers.
+
+A command never reports success when the file was changed and the machine could not follow: a proxy started by hand, a job file aimux cannot edit, or a part aimux starts and stops nothing for yet (phone access, sandboxes). It says which and exits 1.
 
 `aimux engine add` expects the engine's key in the secret-store entry `<name>-key`, and writes that reference into the file. When the entry is not there yet, it says so and how to create it. It never reads the key.
 
@@ -96,7 +100,7 @@ aimux setup --check
 
 It reads the section, compares it with each service's job, and prints what `--apply` would do. It changes nothing. It exits 1 when something would change, so a script can test it, and it lists every problem in the section with its line when the section cannot be used.
 
-With `--json` it prints `{"schema_version": 1, "stated": ..., "changes": ..., "plan": [...]}`, each line of the plan with `part`, `service`, `action` (`none`, `adopt`, `change arguments`, `start`, `skip`), the arguments `was` and `now`, `restarts` and a `note`. A section with problems gives `{"schema_version": 1, "problems": [...]}`, and `--apply --json` gives `{"schema_version": 1, "results": [...]}`, each result a plan line with its `outcome` (`unchanged`, `adopted`, `changed`, `started`, `rolled back`, `failed`, `skipped`) and a `detail`.
+With `--json` it prints `{"schema_version": 1, "stated": ..., "changes": ..., "plan": [...]}`, each line of the plan with `part`, `service`, `action` (`none`, `adopt`, `change arguments`, `start`, `stop`, `skip`), the arguments `was` and `now`, `restarts` and a `note`. A section with problems gives `{"schema_version": 1, "problems": [...]}`, and `--apply --json` gives `{"schema_version": 1, "results": [...]}`, each result a plan line with its `outcome` (`unchanged`, `adopted`, `changed`, `started`, `stopped`, `rolled back`, `failed`, `skipped`) and a `detail`.
 
 ```text
 PART             SERVICE      WILL        DETAIL
@@ -125,8 +129,8 @@ What it will and will not touch in a job file:
 
 If a service does not answer after its restart, its old job file is written back and it is started from that again. The command says so and exits 1. That holds when you interrupt it while it waits: the wait ends, and the job file still goes back before the command returns. The service is asked on the port its new arguments give it, so changing the port is not mistaken for a service that did not come up.
 
-A service whose job is right and which does not answer is started.
+A service of a part that is on, whose job is right and which does not answer, is started. A part that is off and whose port still answers after its job was stopped is reported, not called off: something else was started on that port.
 
 Moving the model proxy to another port moves `aimux status` and `aimux upgrade` with it: both read the port from the job. A session still has to be pointed at the new port (`aimux model proxy env --port`), and the proxy's request history and ledger are kept per port, so a new port starts new files.
 
-Turning a part off (`enabled: false`) and making a job for a service that has none are not built yet: `--check` says so for that part and `--apply` leaves it as it is.
+Making a job for a service that has none is not built yet: `--check` says so for that part and `--apply` leaves it as it is.

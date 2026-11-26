@@ -27,6 +27,11 @@ type PartJob interface {
 	Write([]byte) error
 	// Reload makes the supervisor run what the file says, started afresh.
 	Reload() error
+	// Stop takes the job from the supervisor and keeps it from coming back by itself, at a crash or at the next
+	// login. Reload brings it back.
+	Stop() error
+	// KeptOff reports whether the supervisor has been told not to bring the job back (what Stop leaves behind).
+	KeptOff() (bool, error)
 	// Loaded reports whether the supervisor has the job at all. One that is not loaded is not running and will
 	// not be started again by itself.
 	Loaded() (bool, error)
@@ -62,6 +67,7 @@ const (
 	ActionAdopt  = "adopt"            // its job is taken under management as it is: recorded, not restarted
 	ActionChange = "change arguments" // its job's arguments change, and it restarts
 	ActionStart  = "start"            // its job is as the settings state, and is not loaded: it is started
+	ActionStop   = "stop"             // the part is off and its service runs: it is stopped, and stays so
 	ActionSkip   = "skip"             // nothing is done, and Note says why
 )
 
@@ -84,6 +90,7 @@ const (
 	ApplyAdopted    = "adopted"
 	ApplyChanged    = "changed"
 	ApplyStarted    = "started"
+	ApplyStopped    = "stopped"
 	ApplyRolledBack = "rolled back"
 	ApplyFailed     = "failed"
 	ApplySkipped    = "skipped"
@@ -141,11 +148,14 @@ func PlanParts(services []PartService, s parts.Settings) []JobChange {
 
 func planService(part string, svc PartService, stated parts.PartSettings) JobChange {
 	change := JobChange{Part: part, Service: svc.Service.ID, Action: ActionSkip}
-	if stated.Enabled == nil || !*stated.Enabled {
-		change.Note = "turning a part off is not built yet; the service is left running"
+	if stated.Enabled == nil {
+		change.Note = "the settings do not say whether this part is on"
 		return change
 	}
 	file, err := svc.Job.Read()
+	if !*stated.Enabled {
+		return planOff(change, svc, file, err)
+	}
 	if errors.Is(err, os.ErrNotExist) {
 		change.Note = "there is no job for this service to manage"
 		return change
@@ -195,6 +205,60 @@ func planService(part string, svc PartService, stated parts.PartSettings) JobCha
 		change.Action = ActionNone
 	}
 	return change
+}
+
+// planOff is the plan for a part the settings turn off: its service is stopped when it runs or could come back
+// by itself, and nothing is done when it is stopped and kept off already.
+func planOff(change JobChange, svc PartService, file []byte, readErr error) JobChange {
+	if errors.Is(readErr, os.ErrNotExist) {
+		// No job. Something may still answer: a service started by hand, which is not aimux's to stop.
+		if row := runStatusProbe(context.Background(), svc.probeFor(nil), statusProbeLimit); answering(row) {
+			change.Note = fmt.Sprintf("a %s answers and no job starts it; stop it where it was started", svc.Service.Name)
+			return change
+		}
+		change.Action = ActionNone
+		return change
+	}
+	if svc.Service.ID == "mcp-proxy" {
+		// More than a job: Claude Code's server entries point at it, and its own command puts them back. That
+		// command also removes the job, after which there is nothing left to say here.
+		change.Note = "the MCP proxy is turned off with its own command, which gives Claude Code its servers back: aimux mcp proxy uninstall"
+		return change
+	}
+	if readErr != nil {
+		change.Note = "its job file could not be read: " + readErr.Error()
+		return change
+	}
+	// A job aimux cannot follow is one it could not start again either: it is not stopped.
+	args, err := parts.JobArgs(file)
+	if err == nil {
+		_, err = parts.WantedArgs(svc.Service, args, parts.PartSettings{})
+	}
+	if err != nil {
+		change.Note = err.Error()
+		return change
+	}
+	change.sum, change.Was = sha256.Sum256(file), args[1:]
+	loaded, loadedErr := svc.Job.Loaded()
+	keptOff, offErr := svc.Job.KeptOff()
+	switch {
+	case loadedErr != nil || offErr != nil:
+		change.Note = "the state of its job could not be told"
+	case loaded || !keptOff:
+		// Running, or stopped and free to come back at the next login: off means neither.
+		change.Action, change.Restarts = ActionStop, loaded
+	case answering(runStatusProbe(context.Background(), svc.probeFor(args[1:]), statusProbeLimit)):
+		// Its job is stopped and kept off, and its port answers: something else was started there.
+		change.Note = fmt.Sprintf("its job is off and a %s still answers on its port; stop it where it was started", svc.Service.Name)
+	default:
+		change.Action = ActionNone
+	}
+	return change
+}
+
+// answering reports whether a probe found something that answers; "not installed" and "down" are nothing there.
+func answering(row ServiceStatus) bool {
+	return row.State == ServiceOK || row.State == ServiceDegraded
 }
 
 // ApplyParts carries out plan, which PlanParts made from the same services and settings. Each service is
@@ -288,6 +352,20 @@ func applyService(ctx context.Context, svc PartService, line JobChange, wait tim
 	}
 	// No slack before "since": the answer has to come from a process started after this reload, so another
 	// listener that happened to start a moment ago on the same port is not taken for this job.
+	if line.Action == ActionStop {
+		if err := svc.Job.Stop(); err != nil {
+			return ApplyFailed, "its job could not be stopped", err
+		}
+		// Stopped means it no longer answers, where it was.
+		deadline := time.Now().Add(wait)
+		for runStatusProbe(ctx, svc.probeFor(line.Was), statusProbeLimit).State != ServiceDown {
+			if !time.Now().Before(deadline) || ctx.Err() != nil {
+				return ApplyFailed, "its job was stopped, and something still answers where it was", fmt.Errorf("%s still answers after its job was stopped", svc.Service.Name)
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+		return ApplyStopped, "", nil
+	}
 	if line.Action == ActionStart {
 		since := time.Now()
 		if err := svc.Job.Reload(); err != nil {

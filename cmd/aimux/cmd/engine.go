@@ -64,7 +64,8 @@ func (p partsChange) run(ctx context.Context, edit func(configPath string) error
 	if !p.asJSON {
 		_, _ = fmt.Fprintf(out, "%s\n\n", p.said(changed))
 	}
-	err := runSetupParts(ctx, p.configPath, p.services(), setupPartsOpts{apply: true, yes: p.yes, asJSON: p.asJSON, ask: p.ask}, out)
+	// Only the part this command is about: what the file says of another part waits for aimux setup --apply.
+	err := runSetupParts(ctx, p.configPath, p.services(), setupPartsOpts{apply: true, yes: p.yes, asJSON: p.asJSON, ask: p.ask, onlyPart: p.part}, out)
 	switch {
 	case errors.Is(err, errNotAgreed):
 		return errors.New("the file holds the change and the service was not restarted; to apply it later: aimux setup --apply")
@@ -359,8 +360,9 @@ func newPartSwitchCmd(env frontEnv, on bool) *cobra.Command {
 	cmd := &cobra.Command{
 		Use: use, Short: short, Args: cobra.ExactArgs(1),
 		Long: short + ": " + strings.Join(ids, ", ") + ".\n\n" +
-			"It states it in the parts section of ~/.aimux/config.yaml and then makes the services match, asking before a\n" +
-			"restart. A part the file does not name is left as it is found; aimux setup --check shows what the file says.",
+			"It states it in the parts section of ~/.aimux/config.yaml and then makes that part's service match, asking\n" +
+			"before a restart or a stop (--yes agrees to either). What the file says about another part waits for\n" +
+			"aimux setup --apply. A part the file does not name is left as it is found; aimux setup --check shows what the file says.",
 		RunE: func(c *cobra.Command, a []string) error {
 			c.SilenceUsage = true
 			ctx, stop := signal.NotifyContext(c.Context(), os.Interrupt, syscall.SIGTERM)

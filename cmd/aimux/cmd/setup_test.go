@@ -232,9 +232,9 @@ type setupDoc struct {
 	} `json:"steps"`
 	Approved []string `json:"approved"`
 	Summary  []struct {
-		Concern string `json:"concern"`
-		Status  string `json:"status"`
-		Detail  string `json:"detail"`
+		Concern string   `json:"concern"`
+		Status  string   `json:"status"`
+		Detail  string   `json:"detail"`
 		Next    []string `json:"next"`
 	} `json:"summary"`
 }
