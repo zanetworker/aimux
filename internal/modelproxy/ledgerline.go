@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"crypto/rand"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
@@ -40,34 +39,26 @@ func LedgerName(port int) string {
 	return fmt.Sprintf("model-proxy-%d", port)
 }
 
-// startModelCall fills in what is known when a request arrives: who it belongs to, what was asked for and which
+// startModelCall fills in what is known when a call arrives: who it belongs to, what was asked for and which
 // engine will answer. The turn is taken now, so calls are numbered in the order they arrived, not the order they
 // finished. responseModel is the model that will answer when the proxy already knows it. change is a switch line
 // to write first, when the session's main conversation was last answered by another engine; otherwise nil.
-func startModelCall(table *turns, r *http.Request, request messageRequest, engine, responseModel, effort string) (call, change *ledger.Line) {
-	// Read from the metadata whatever model was named: the proxy keeps a Codex thread only for requests that name
-	// a codex: model, but every request belongs to its session.
-	metadataSession := metadataSessionID(request.Metadata)
-	metadataSession = ledgerID(metadataSession)
-	agent := ledgerID(r.Header.Get(agentHeader))
-	session := cmp.Or(metadataSession, ledgerID(r.Header.Get(sessionHeader)))
-	side := sideRequest(metadataSession != "", agent != "")
-	startsTurn, prompts, last := requestShape(request.Messages)
-	harness := ""
-	if strings.HasPrefix(r.Header.Get("User-Agent"), "claude-cli") {
-		harness = "claude-code"
-	}
-	turn, from := table.nextOn(session, side, startsTurn, prompts, last, engine)
+//
+// It takes the facts of the call and never the request they were read from, so any front can use it.
+func startModelCall(table *turns, facts CallFacts, engine, responseModel string) (call, change *ledger.Line) {
+	role := RoleOf(facts)
+	side := role != RoleMain
+	turn, from := table.nextOn(facts.Session, side, facts.StartsTurn, facts.Prompts, facts.LastFingerprint, engine)
 	if from != "" {
 		change = &ledger.Line{
-			At: time.Now(), Kind: ledger.KindSwitch, Session: session, Turn: turn, Harness: harness,
+			At: time.Now(), Kind: ledger.KindSwitch, Session: facts.Session, Turn: turn, Harness: facts.Harness,
 			FromEngine: from, ToEngine: engine,
 		}
 	}
 	return &ledger.Line{
-		Kind: ledger.KindModelCall, Session: session, Side: side, Agent: agent,
-		Turn: turn, Call: "mc_" + rand.Text(), Harness: harness,
-		RequestModel: ledgerModel(request.Model), ResponseModel: responseModel, Engine: engine, Effort: ledgerID(effort),
+		Kind: ledger.KindModelCall, Session: facts.Session, Role: role, Side: side, Agent: facts.Agent,
+		Turn: turn, Call: "mc_" + rand.Text(), Harness: facts.Harness,
+		RequestModel: facts.Model, ResponseModel: responseModel, Engine: engine, Effort: facts.Effort,
 	}, change
 }
 

@@ -41,6 +41,7 @@ Models not in the pricing table show `$0.00`. To add custom model pricing, submi
 aimux cost                      # the last 24 hours, by session
 aimux cost --by model --since 7d
 aimux cost --by day --since all
+aimux cost --by role --since 7d
 aimux cost --session 0b61f1d5   # one session: its id, or the start of it
 ```
 
@@ -67,6 +68,8 @@ What it counts and what it does not:
 - It counts model calls that passed the model proxy. A session that talks to its provider directly is not in the ledger, so it is not here. The costs on agent cards and in the dashboard, described above, come from each harness's own transcript and are a separate count.
 - Under the table it says what the ledger could not show: calls whose answer carried no token figures (counted as requests, their tokens in no sum; `no_usage` in the JSON), calls with no session (counted in no row and not in the total), lines written by another version of aimux, lines that are not whole, and lines missing from a writer. When any of the last three applies it adds `totals are incomplete`.
 - With no ledger yet it says so and names the command that makes the model proxy write one.
+
+With `--by role` the rows are the kinds of work a call was: `main` (a session's main conversation), `subagent` (a subagent's own conversation) and `background` (a call the harness makes outside any conversation). The role is decided when the call arrives, from the request's own marks: a subagent's calls carry its id, and a main conversation names its session in the request. The model plays no part, so a session you moved to a small model is still `main`. A call recorded before roles were written is read by the same rule from what its line does hold, so nothing is left unlabelled. A request does not say which kind of subagent sent it, so all subagents are one row.
 
 `--json` prints the same report with whole session ids. Each row has `asked`, the names the client used, and `models`, the models that answered; with `--by model` the row's key is the served model and `models` is left out. `files` is how many ledger files were read.
 

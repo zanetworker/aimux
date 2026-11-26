@@ -22,7 +22,8 @@ func newCostCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "cost",
 		Short: "Show what your sessions spent: model calls and tokens from the ledger",
-		Long: "Read the ledger (~/.aimux/ledger) and sum its model calls per session, per model or per day.\n" +
+		Long: "Read the ledger (~/.aimux/ledger) and sum its model calls per session, per model, per day or per\n" +
+			"role (--by role: main for a session's main conversation, subagent, background).\n" +
 			"It counts the calls that passed the model proxy. A session that talks to its provider directly is not\n" +
 			"in it. The COST column reads unpriced: the counts are real, prices are not applied yet.\n" +
 			"SERVED is the model that answered. ASKED AS lists the names the client used when they differ from it,\n" +
@@ -50,7 +51,7 @@ func newCostCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&since, "since", "24h", "How far back: a duration such as 90m, 24h or 7d, or all")
-	cmd.Flags().StringVar(&by, "by", "session", "Group by session, model or day")
+	cmd.Flags().StringVar(&by, "by", "session", "Group by session, model, day or role (main, subagent, background)")
 	cmd.Flags().StringVar(&session, "session", "", "Only this session: its id, or the start of it")
 	return cmd
 }
@@ -59,9 +60,9 @@ func newCostCmd() *cobra.Command {
 func costOptions(since, by, session string, now time.Time) (controller.MeterOptions, error) {
 	opts := controller.MeterOptions{By: controller.MeterBy(by), Session: session}
 	switch opts.By {
-	case controller.MeterBySession, controller.MeterByModel, controller.MeterByDay:
+	case controller.MeterBySession, controller.MeterByModel, controller.MeterByDay, controller.MeterByRole:
 	default:
-		return opts, fmt.Errorf("unknown --by %q: choose session, model or day", by)
+		return opts, fmt.Errorf("unknown --by %q: choose session, model, day or role", by)
 	}
 	if since == "all" {
 		return opts, nil
@@ -109,7 +110,7 @@ func writeCost(out io.Writer, report controller.MeterReport, by controller.Meter
 		} else {
 			_, _ = fmt.Fprintf(&text, "Model calls %s\n\n", window)
 		}
-		header := map[controller.MeterBy]string{controller.MeterBySession: "SESSION", controller.MeterByModel: "MODEL", controller.MeterByDay: "DAY"}[by]
+		header := map[controller.MeterBy]string{controller.MeterBySession: "SESSION", controller.MeterByModel: "MODEL", controller.MeterByDay: "DAY", controller.MeterByRole: "ROLE"}[by]
 		served := by != controller.MeterByModel
 		table := tabwriter.NewWriter(&text, 0, 0, 2, ' ', 0)
 		row := func(key, asked, models string, r controller.MeterRow) {

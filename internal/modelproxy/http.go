@@ -209,7 +209,7 @@ func serveMessage(w http.ResponseWriter, r *http.Request, backend Backend, confi
 	outcome, session = "stateless", turn.session
 	if config.ledger != nil {
 		var change *ledger.Line
-		call, change = startModelCall(config.turns, r, request, engineCodex, "codex:"+turn.Model, turn.Effort)
+		call, change = startModelCall(config.turns, callFactsOfMessages(r, request, turn.Effort), engineCodex, "codex:"+turn.Model)
 		if change != nil {
 			config.ledger.Write(*change)
 		}

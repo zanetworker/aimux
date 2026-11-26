@@ -185,7 +185,7 @@ func TestHandler_OwnLoginGoesToAnthropic(t *testing.T) {
 	}
 	line := lines[0]
 	want := ledger.Line{
-		Kind: ledger.KindModelCall, Session: "0b61f1d5-own-login", Turn: "1", Harness: "claude-code",
+		Kind: ledger.KindModelCall, Session: "0b61f1d5-own-login", Turn: "1", Harness: "claude-code", Role: RoleMain,
 		RequestModel: "claude-sonnet-5-5", ResponseModel: "claude-sonnet-5-5", Engine: engineAnthropic,
 		InputTokens: 1200 + 90000 + 300, CacheRead: 90000, CacheWrite: 300, OutputTokens: 40, Outcome: ledger.OutcomeOK,
 	}
