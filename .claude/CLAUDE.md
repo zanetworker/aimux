@@ -357,6 +357,7 @@ Not yet wired into `app.go` startup (the `LoadProject` function exists but isn't
 **CLI has, TUI and Web missing:**
 - Chat with an idle session (`aimux chat`, `internal/acprun`); web and phone come with the remote listener
 - MCP proxy (`aimux mcp proxy`); a daemon, no UI planned
+- Reviewing changed tools one by one (`aimux tools review`: each diff, then y, n or a for the rest; one question per tool of a source, naming every set that lists it). The web and TUI have no tool review at all.
 - Background service health (`aimux status`). The dashboard can consume `aimux status --json` later.
 - The meter (`aimux cost`, `controller.Meter`): requests and tokens from the ledger, unpriced. The TUI cost view and the dashboard's `/api/costs` still count from transcripts with their own arithmetic; they move to the meter with prices (slice 5).
 - Upgrading the background services (`aimux upgrade`, `controller.UpgradeServices`); a maintenance command, no UI planned. The tool gateway is not moved yet: it runs Wingman's copy. `aimux mcp proxy install` keeps the MCP proxy's job on its own copy once an upgrade has moved it (`proxyAgentBinary`), and the proxy's "upgrade restart pending" messages name `aimux upgrade mcp-proxy`. `TestUpgradeLive_AgainstLaunchd` (build tag `launchdlive`) runs the whole upgrade against the real launchd on a job of its own.

@@ -439,9 +439,9 @@ func (r *frontRig) changeTools() {
 	r.live["slack"] = []json.RawMessage{rawTool("history", "number")}
 }
 
-// Setup never approves a tool without a terminal, with --json, or on --yes
-// alone, whatever stdin holds.
-func TestSetup_NeverApprovesWithoutExplicitYesOnATerminal(t *testing.T) {
+// Setup never approves a tool and never asks to: it says how many need review and names the command, whatever
+// stdin holds, with or without a terminal.
+func TestSetup_NeverApprovesOrAsksAboutTools(t *testing.T) {
 	for _, c := range []struct {
 		name string
 		tty  bool
@@ -449,13 +449,14 @@ func TestSetup_NeverApprovesWithoutExplicitYesOnATerminal(t *testing.T) {
 	}{
 		{"no terminal", false, nil},
 		{"no terminal --yes", false, []string{"--yes"}},
+		{"terminal", true, nil},
+		{"terminal --yes", true, []string{"--yes"}},
 		{"terminal --json", true, []string{"--json"}},
-		{"terminal --json --yes", true, []string{"--json", "--yes"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			r := newFrontRig(t)
 			r.changeTools()
-			r.tty, r.input = c.tty, "\ny\ny\ny\ny\n"
+			r.tty, r.input = c.tty, "\ny\ny\na\ny\n"
 			before := r.pins(t)
 			out, errOut, err := r.setup(t, c.args...)
 			if err != nil {
@@ -464,29 +465,35 @@ func TestSetup_NeverApprovesWithoutExplicitYesOnATerminal(t *testing.T) {
 			if r.pins(t) != before {
 				t.Fatal("setup approved a tool")
 			}
-			if strings.Contains(out, "approve now?") {
-				t.Fatalf("asked without a terminal:\n%s", out)
+			if strings.Contains(out, "Approve") {
+				t.Fatalf("setup asked about a tool:\n%s", out)
 			}
-			if !strings.Contains(errOut, "Next: aimux tools diff") {
+			if !strings.Contains(errOut, "Next: aimux tools review") {
 				t.Fatalf("stderr = %q", errOut)
 			}
 		})
 	}
 }
 
-// On a terminal, each tool to review is offered; only a yes to the diff and
-// a yes to approve pins it, and both are written in one save.
-func TestSetup_TTYApprovesOnlyExplicitYesPerTool(t *testing.T) {
+// reviewRun runs `aimux tools review` on the rig, with its scripted terminal.
+func (r *frontRig) reviewRun(t *testing.T, args ...string) (string, string, error) {
+	t.Helper()
+	env := r.env.toolsEnv()
+	env.IsTTY, env.In = func() bool { return r.tty }, func() io.Reader { return strings.NewReader(r.input) }
+	return runTools(t, env, append([]string{"review"}, args...)...)
+}
+
+// Each tool to review is shown with its diff, and only a yes pins it; all are written in one save.
+func TestToolsReview_ApprovesOnlyAnExplicitYes(t *testing.T) {
 	r := newFrontRig(t)
 	r.changeTools()
-	r.tty = true
-	r.input = "\ny\ny\ny\n\n" // the parts menu: none; jira: diff yes, approve yes; slack: diff yes, approve Enter (no)
-	out, errOut, err := r.setup(t, "--yes")
+	r.tty, r.input = true, "y\n\n" // jira: yes; slack: Enter, which is no
+	out, _, err := r.reviewRun(t)
 	if err != nil {
-		t.Fatalf("%v\n%s", err, errOut)
+		t.Fatalf("%v\n%s", err, out)
 	}
-	for _, want := range []string{"changed jira:readonly/search: Show diff and approve now? [y/N]", "q.type: \"string\" -> \"number\"",
-		"Approve jira:readonly/search? [y/N]", "changed slack:readonly/history: Show diff and approve now? [y/N]", "Approved jira:readonly/search"} {
+	for _, want := range []string{"changed jira:readonly/search", "q.type: \"string\" -> \"number\"",
+		"Approve jira:readonly/search? [y/N/a]", "Approve slack:readonly/history? [y/N/a]", "Approved jira:readonly/search", "1 tool still needs review"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("out lacks %q:\n%s", want, out)
 		}
@@ -495,8 +502,49 @@ func TestSetup_TTYApprovesOnlyExplicitYesPerTool(t *testing.T) {
 	if st["jira:readonly/search"] != toolgateway.StatusActive || st["slack:readonly/history"] != toolgateway.StatusChanged {
 		t.Fatalf("statuses = %v", st)
 	}
-	if !strings.Contains(errOut, "Next: aimux tools diff, then aimux tools approve slack:readonly") {
-		t.Fatalf("stderr = %q", errOut)
+}
+
+// "a" approves that tool and every one after it, each still shown with its diff.
+func TestToolsReview_AApprovesTheRest(t *testing.T) {
+	r := newFrontRig(t)
+	r.changeTools()
+	r.tty, r.input = true, "a\n"
+	out, _, err := r.reviewRun(t)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	st := toolsStatusOf(t, r)
+	if st["jira:readonly/search"] != toolgateway.StatusActive || st["slack:readonly/history"] != toolgateway.StatusActive {
+		t.Fatalf("statuses = %v\n%s", st, out)
+	}
+	if strings.Count(out, "? [y/N/a]") != 1 || !strings.Contains(out, "changed slack:readonly/history") || strings.Contains(out, "still need") {
+		t.Fatalf("out:\n%s", out)
+	}
+}
+
+// Without a terminal, or with --json, nothing is asked or approved, and the commands that work there are named.
+func TestToolsReview_NeedsATerminal(t *testing.T) {
+	for _, args := range [][]string{nil, {"--json"}} {
+		r := newFrontRig(t)
+		r.changeTools()
+		r.tty, r.input = len(args) > 0, "a\n"
+		before := r.pins(t)
+		_, _, err := r.reviewRun(t, args...)
+		if err == nil || !strings.Contains(err.Error(), "aimux tools diff") || !strings.Contains(err.Error(), "aimux tools approve") {
+			t.Fatalf("%v: err = %v", args, err)
+		}
+		if r.pins(t) != before {
+			t.Fatalf("%v: approved a tool", args)
+		}
+	}
+}
+
+func TestToolsReview_NothingToReview(t *testing.T) {
+	r := newFrontRig(t)
+	r.tty = true
+	out, _, err := r.reviewRun(t)
+	if err != nil || !strings.Contains(out, "Nothing to review") {
+		t.Fatalf("%q, %v", out, err)
 	}
 }
 
@@ -513,13 +561,13 @@ func toolsStatusOf(t *testing.T, r *frontRig) map[string]string {
 	return got
 }
 
-// EOF on the terminal answers no.
-func TestSetup_TTYEOFApprovesNothing(t *testing.T) {
+// The end of input answers no.
+func TestToolsReview_EOFApprovesNothing(t *testing.T) {
 	r := newFrontRig(t)
 	r.changeTools()
-	r.tty, r.input = true, "\ny\n"
+	r.tty, r.input = true, ""
 	before := r.pins(t)
-	if _, _, err := r.setup(t); err != nil {
+	if _, _, err := r.reviewRun(t); err != nil {
 		t.Fatal(err)
 	}
 	if r.pins(t) != before {
@@ -605,7 +653,7 @@ func TestSetup_SummaryProblemsAndNext(t *testing.T) {
 			t.Errorf("line %d = %q, want %q", i, lines[i], sym)
 		}
 	}
-	for _, want := range []string{"Next: aimux tools diff", "Next: store the OpenRouter key", "Next: start the OpenShell gateway"} {
+	for _, want := range []string{"Next: aimux tools review", "Next: store the OpenRouter key", "Next: start the OpenShell gateway"} {
 		if !strings.Contains(errOut, want) {
 			t.Errorf("stderr lacks %q:\n%s", want, errOut)
 		}
@@ -691,3 +739,31 @@ func TestAgentContextCmd_ListsSetupDoctorUninstall(t *testing.T) {
 
 // rigBinary is the aimux the rig's host.sh execs.
 func rigBinary(home string) string { return filepath.Join(home, "App Bin", "aimux") }
+
+// Two sets that list the same tool of one source share one approval: it is asked once, and a no holds for both,
+// also when a later answer approves all the rest.
+func TestToolsReview_ANoHoldsForEverySetThatListsTheTool(t *testing.T) {
+	r := newFrontRig(t)
+	reg := frontRegistry(r.env.Home)
+	reg.Sets["jira:extra"] = toolreg.Set{Source: "jira", Tools: []string{"search"}}
+	path := toolreg.DefaultPath(r.env.Home)
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := toolreg.WriteNew(path, reg); err != nil {
+		t.Fatal(err)
+	}
+	r.changeTools()
+	r.tty, r.input = true, "n\na\na\n"
+	out, _, err := r.reviewRun(t)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	st := toolsStatusOf(t, r)
+	if st["jira:readonly/search"] == toolgateway.StatusActive || st["jira:extra/search"] == toolgateway.StatusActive || st["slack:readonly/history"] != toolgateway.StatusActive {
+		t.Fatalf("statuses = %v\n%s", st, out)
+	}
+	if strings.Count(out, "? [y/N/a]") != 2 || !strings.Contains(out, "jira:extra/search, jira:readonly/search") {
+		t.Fatalf("the shared tool was not asked about once, with both sets named:\n%s", out)
+	}
+}
