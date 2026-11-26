@@ -55,6 +55,8 @@ func TestSetupApplyLive_AgainstLaunchd(t *testing.T) {
 			}
 		}
 		_ = agent.Uninstall()
+		// A stop tells launchd to keep the job off; that mark is not left behind for the label.
+		_, _ = runLaunchctl("launchctl", "enable", "gui/"+strconv.Itoa(os.Getuid())+"/"+label)
 		if madeHere {
 			_ = os.Remove(history)
 		}
@@ -164,5 +166,29 @@ func TestSetupApplyLive_AgainstLaunchd(t *testing.T) {
 	}
 	if kept, err := os.ReadFile(filepath.Join(svc.Dir, controller.JobBeforeName)); err != nil || string(kept) != string(original) { // #nosec G304 -- test temp file
 		t.Errorf("the job file from before is not kept: %v", err)
+	}
+
+	// The part turned off: launchd no longer has the job, nothing answers, and the file is untouched.
+	plan, results, err = apply("parts:\n  inference-proxy:\n    enabled: false\n")
+	t.Logf("off: %+v %+v", plan, results)
+	if err != nil || results[0].Outcome != controller.ApplyStopped || engines() != nil {
+		t.Fatalf("off: %v, %+v, still answers with %v", err, results, engines())
+	}
+	if loaded, _ := agent.Loaded(); loaded {
+		t.Fatal("launchd still has the job after the part was turned off")
+	}
+	if now, _ := svc.Job.Read(); string(now) != string(original) {
+		t.Error("stopping changed the job file")
+	}
+	// Launchd keeps it off: a plain load of the file is refused until it is turned on again.
+	if out, loadErr := runLaunchctl("launchctl", "bootstrap", "gui/"+strconv.Itoa(os.Getuid()), agent.PlistPath); loadErr == nil {
+		t.Errorf("a job that was stopped could be loaded again behind aimux's back: %s", out)
+		_, _ = runLaunchctl("launchctl", "bootout", "gui/"+strconv.Itoa(os.Getuid())+"/"+label)
+	}
+	// And on again: started from the same file, answering.
+	plan, results, err = apply("parts:\n  inference-proxy:\n    enabled: true\n")
+	t.Logf("on again: %+v %+v", plan, results)
+	if err != nil || results[0].Outcome != controller.ApplyStarted || !slices.Equal(engines(), []string{"codex"}) {
+		t.Fatalf("on again: %v, %+v, engines %v", err, results, engines())
 	}
 }

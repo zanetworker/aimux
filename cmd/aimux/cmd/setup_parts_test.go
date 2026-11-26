@@ -18,10 +18,11 @@ import (
 
 // plainJob is a job kept in a real file, whose service is "up" after any reload.
 type plainJob struct {
-	path string
-	mu   sync.Mutex
-	at   time.Time
-	n    int
+	path    string
+	mu      sync.Mutex
+	at      time.Time
+	n       int
+	stopped bool
 }
 
 func (j *plainJob) Read() ([]byte, error)   { return os.ReadFile(j.path) } // #nosec G304 -- the test's own file
@@ -29,11 +30,28 @@ func (j *plainJob) Write(data []byte) error { return os.WriteFile(j.path, data, 
 func (j *plainJob) Reload() error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	j.at, j.n = time.Now(), j.n+1
+	j.at, j.n, j.stopped = time.Now(), j.n+1, false
 	return nil
 }
 
-func (j *plainJob) Loaded() (bool, error) { return true, nil }
+func (j *plainJob) Stop() error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.stopped = true
+	return nil
+}
+
+func (j *plainJob) KeptOff() (bool, error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.stopped, nil
+}
+
+func (j *plainJob) Loaded() (bool, error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return !j.stopped, nil
+}
 
 func (j *plainJob) reloads() int {
 	j.mu.Lock()
@@ -62,6 +80,9 @@ func partsFixture(t *testing.T, config string) (configPath string, services []co
 	probe := controller.StatusProbe{Name: "model proxy", Run: func(context.Context) controller.ServiceStatus {
 		job.mu.Lock()
 		defer job.mu.Unlock()
+		if job.stopped {
+			return controller.ServiceStatus{Name: "model proxy", State: controller.ServiceDown}
+		}
 		at := job.at
 		return controller.ServiceStatus{Name: "model proxy", State: controller.ServiceOK, StartedAt: &at}
 	}}
@@ -199,5 +220,51 @@ func TestSetupParts_LeftAloneIsNotNothingToChange(t *testing.T) {
 	// Asked to apply, it does not report success: the proxy still does not match the settings.
 	if err := runSetupParts(context.Background(), path, services, setupPartsOpts{apply: true, yes: true}, &out); !errors.Is(err, errLeftAlone) || !strings.Contains(err.Error(), "model proxy") || job.reloads() != 0 {
 		t.Errorf("apply: %v", err)
+	}
+}
+
+func TestSetupParts_TurningAPartOffAsksAndStops(t *testing.T) {
+	path, services, job := partsFixture(t, "parts:\n  inference-proxy:\n    enabled: false\n")
+	var out bytes.Buffer
+	var asked string
+	if err := runSetupParts(context.Background(), path, services, setupPartsOpts{apply: true, ask: func(q string) bool { asked = q; return true }}, &out); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if loaded, _ := job.Loaded(); loaded || !strings.Contains(asked, "Stop the model proxy now?") || !strings.Contains(asked, "until it is turned on again") {
+		t.Errorf("loaded %v, asked %q", loaded, asked)
+	}
+	for _, want := range []string{"stop", "model proxy: stopped"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, out.String())
+		}
+	}
+	// Nobody to ask and no --yes: refused, naming what it would do.
+	path, services, job = partsFixture(t, "parts:\n  inference-proxy:\n    enabled: false\n")
+	err := runSetupParts(context.Background(), path, services, setupPartsOpts{apply: true}, &out)
+	if loaded, _ := job.Loaded(); !errors.Is(err, errNeedsYes) || !strings.Contains(err.Error(), "stop the model proxy") || !loaded {
+		t.Errorf("err = %v, loaded %v", err, loaded)
+	}
+}
+
+func TestLaunchdKeptOff(t *testing.T) {
+	listing := "disabled services = {\n\t\"com.apple.Siri.agent\" => enabled\n\t\"com.aimux.model-proxy\" => disabled\n\t\"com.old.style\" => true\n\t\"com.other\" => false\n}\n"
+	run := func(string, ...string) ([]byte, error) { return []byte(listing), nil }
+	for label, want := range map[string]bool{"com.aimux.model-proxy": true, "com.old.style": true, "com.apple.Siri.agent": false, "com.other": false, "com.absent": false} {
+		if got, err := launchdKeptOff(run, 501, label); err != nil || got != want {
+			t.Errorf("%s: %v, %v; want %v", label, got, err, want)
+		}
+	}
+	if _, err := launchdKeptOff(func(string, ...string) ([]byte, error) { return nil, errors.New("no") }, 501, "x"); err == nil {
+		t.Error("a launchd that does not answer was read as \"not kept off\"")
+	}
+}
+
+// A stop the file holds for one part is not carried out by a command about another.
+func TestSetupParts_OnlyThePartTheCommandIsAbout(t *testing.T) {
+	path, services, job := partsFixture(t, "parts:\n  inference-proxy:\n    enabled: false\n  mcp-proxy:\n    enabled: true\n")
+	var out bytes.Buffer
+	err := runSetupParts(context.Background(), path, services, setupPartsOpts{apply: true, yes: true, onlyPart: "mcp-proxy"}, &out)
+	if loaded, _ := job.Loaded(); err != nil || !loaded || strings.Contains(out.String(), "model proxy") {
+		t.Fatalf("err = %v, the model proxy still loaded: %v\n%s", err, loaded, out.String())
 	}
 }

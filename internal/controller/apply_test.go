@@ -43,7 +43,9 @@ type fileJob struct {
 	mu      sync.Mutex
 	started *time.Time
 	reloads int
-	refuse  error // a Reload that fails outright
+	stops   int
+	off     bool  // told not to come back
+	refuse  error // a Reload or a Stop that fails outright
 }
 
 func (j *fileJob) Read() ([]byte, error)   { return os.ReadFile(j.path) } // #nosec G304 -- the test's own file
@@ -59,12 +61,29 @@ func (j *fileJob) Reload() error {
 	if err != nil {
 		return err
 	}
-	j.started = nil
+	j.started, j.off = nil, false
 	if !strings.Contains(string(data), "broken=") { // an upstream called "broken" keeps the service from starting
 		now := time.Now()
 		j.started = &now
 	}
 	return nil
+}
+
+func (j *fileJob) Stop() error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.stops++
+	if j.refuse != nil {
+		return j.refuse
+	}
+	j.started, j.off = nil, true
+	return nil
+}
+
+func (j *fileJob) KeptOff() (bool, error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.off, nil
 }
 
 func (j *fileJob) Loaded() (bool, error) {
@@ -238,7 +257,6 @@ func TestPlanParts_WhatItDoesNotDo(t *testing.T) {
 		"no job to manage":            {"", proxyOn, ActionSkip, "no job"},
 		"a job it cannot follow":      {strings.Replace(testJobFile, "<string>serve</string>", "<string>serve</string>\n\t\t<string>--</string>", 1), proxyOn, ActionSkip, "--"},
 		"a job that starts something": {strings.Replace(testJobFile, "<string>serve</string>", "<string>status</string>", 1), proxyOn, ActionSkip, "leaves it alone"},
-		"a part turned off":           {testJobFile, "parts:\n  inference-proxy:\n    enabled: false\n", ActionSkip, "not built"},
 	} {
 		service, job := testProxyService(t, tc.job)
 		s := settings(t, tc.yaml)
@@ -422,5 +440,126 @@ func TestPlanParts_AServiceOnAnotherBuildIsUpgradedFirst(t *testing.T) {
 	service.CLIBuild = "v0.14.0-276-g823bd6f3"
 	if plan := PlanParts([]PartService{service}, want); plan[0].Action != ActionChange {
 		t.Errorf("a service that does not answer: %+v", plan)
+	}
+}
+
+const proxyOff = "parts:\n  inference-proxy:\n    enabled: false\n"
+
+func TestApplyParts_APartTurnedOffIsStoppedAndOnAgainStarted(t *testing.T) {
+	service, job := testProxyService(t, testJobFile)
+	off := settings(t, proxyOff)
+	plan := PlanParts([]PartService{service}, off)
+	if len(plan) != 1 || plan[0].Action != ActionStop || !plan[0].Restarts {
+		t.Fatalf("plan = %+v", plan)
+	}
+	results, err := ApplyParts(context.Background(), []PartService{service}, off, plan, ApplyOptions{Wait: 2 * time.Second})
+	if err != nil || results[0].Outcome != ApplyStopped {
+		t.Fatalf("%+v, %v", results, err)
+	}
+	if got, _ := job.Read(); string(got) != testJobFile || job.stops != 1 || job.count() != 0 {
+		t.Errorf("stopping changed the job file, or did not stop it once (%d stops, %d reloads)", job.stops, job.count())
+	}
+	if row := service.Probe.Run(context.Background()); row.State != ServiceDown {
+		t.Errorf("after the stop the service still answers: %+v", row)
+	}
+	// Off and stopped: nothing left to do.
+	if plan := PlanParts([]PartService{service}, off); len(plan) != 1 || plan[0].Action != ActionNone {
+		t.Errorf("a second plan = %+v", plan)
+	}
+	// On again: its job is right and nothing runs it, so it is started.
+	on := settings(t, proxyOn)
+	plan = PlanParts([]PartService{service}, on)
+	if plan[0].Action != ActionStart {
+		t.Fatalf("plan to turn it on again = %+v", plan)
+	}
+	if results, err := ApplyParts(context.Background(), []PartService{service}, on, plan, ApplyOptions{Wait: 2 * time.Second}); err != nil || results[0].Outcome != ApplyStarted {
+		t.Fatalf("%+v, %v", results, err)
+	}
+}
+
+func TestApplyParts_AStopThatFailsIsSaid(t *testing.T) {
+	service, job := testProxyService(t, testJobFile)
+	off := settings(t, proxyOff)
+	plan := PlanParts([]PartService{service}, off)
+	job.refuse = errors.New("launchd said no")
+	results, err := ApplyParts(context.Background(), []PartService{service}, off, plan, ApplyOptions{Wait: 300 * time.Millisecond})
+	if err == nil || results[0].Outcome != ApplyFailed {
+		t.Fatalf("%+v, %v", results, err)
+	}
+}
+
+func TestPlanParts_TurningOffWhatIsNotThereOrHasItsOwnWay(t *testing.T) {
+	// No job: nothing runs, so off is already so.
+	service, _ := testProxyService(t, "")
+	if plan := PlanParts([]PartService{service}, settings(t, proxyOff)); len(plan) != 1 || plan[0].Action != ActionNone {
+		t.Errorf("off with no job: %+v", plan)
+	}
+	// A job that is not loaded and could come back at the next login is not "off" yet: it is marked, with nothing
+	// to restart.
+	idle, idleJob := testProxyService(t, testJobFile)
+	idleJob.mu.Lock()
+	idleJob.started = nil
+	idleJob.mu.Unlock()
+	if plan := PlanParts([]PartService{idle}, settings(t, proxyOff)); len(plan) != 1 || plan[0].Action != ActionStop || plan[0].Restarts {
+		t.Errorf("off with a job that is not loaded and not kept off: %+v", plan)
+	}
+	// No job, and something answers all the same: started by hand, and not aimux's to stop.
+	byHand, _ := testProxyService(t, "")
+	byHand.Probe = StatusProbe{Name: "model proxy", Run: func(context.Context) ServiceStatus {
+		return ServiceStatus{Name: "model proxy", State: ServiceOK}
+	}}
+	if plan := PlanParts([]PartService{byHand}, settings(t, proxyOff)); len(plan) != 1 || plan[0].Action != ActionSkip || !strings.Contains(plan[0].Note, "where it was started") {
+		t.Errorf("off with a proxy started by hand: %+v", plan)
+	}
+	// A job aimux cannot follow is not stopped: it could not be started again.
+	odd, oddJob := testProxyService(t, strings.Replace(testJobFile, "<key>ProgramArguments</key>", "<key>Program</key>\n\t<string>/bin/x</string>\n\t<key>ProgramArguments</key>", 1))
+	if plan := PlanParts([]PartService{odd}, settings(t, proxyOff)); len(plan) != 1 || plan[0].Action != ActionSkip || oddJob.stops != 0 {
+		t.Errorf("off with a job that has a Program key: %+v", plan)
+	}
+	// The MCP proxy is not only a job: Claude Code's server entries point at it. Its own command turns it off.
+	mcp, job := testProxyService(t, testJobFile)
+	mcp.Service = parts.MustService("mcp-proxy")
+	if err := job.Write([]byte(strings.NewReplacer("model-proxy", "mcp-proxy", "<string>model</string>", "<string>mcp</string>").Replace(testJobFile))); err != nil {
+		t.Fatal(err)
+	}
+	plan := PlanParts([]PartService{mcp}, settings(t, "parts:\n  mcp-proxy:\n    enabled: false\n"))
+	if len(plan) != 1 || plan[0].Action != ActionSkip || !strings.Contains(plan[0].Note, "aimux mcp proxy uninstall") {
+		t.Errorf("the MCP proxy turned off: %+v", plan)
+	}
+	// Once that command has run, its job is gone and there is nothing left to do.
+	gone, _ := testProxyService(t, "")
+	gone.Service = parts.MustService("mcp-proxy")
+	gone.Probe = StatusProbe{Name: "mcp proxy", Run: func(context.Context) ServiceStatus { return ServiceStatus{State: ServiceDown} }}
+	if plan := PlanParts([]PartService{gone}, settings(t, "parts:\n  mcp-proxy:\n    enabled: false\n")); len(plan) != 1 || plan[0].Action != ActionNone {
+		t.Errorf("the MCP proxy after its uninstall: %+v", plan)
+	}
+}
+
+// With no job, a probe that reports "not installed" is nothing answering: off is already so.
+func TestPlanParts_OffWithNoJobAndNothingInstalledIsAlreadyOff(t *testing.T) {
+	service, _ := testProxyService(t, "")
+	service.Probe = StatusProbe{Name: "model proxy", Run: func(context.Context) ServiceStatus {
+		return ServiceStatus{Name: "model proxy", State: ServiceNotInstalled}
+	}}
+	plan := PlanParts([]PartService{service}, settings(t, proxyOff))
+	if len(plan) != 1 || plan[0].Action != ActionNone || plan[0].Note != "" {
+		t.Fatalf("plan = %+v", plan)
+	}
+}
+
+// A job stopped and kept off whose port still answers is not off: something else holds the port.
+func TestPlanParts_OffWithAJobKeptOffAndAListenerIsNotOff(t *testing.T) {
+	service, _ := testProxyService(t, testJobFile)
+	off := settings(t, proxyOff)
+	plan := PlanParts([]PartService{service}, off)
+	if _, err := ApplyParts(context.Background(), []PartService{service}, off, plan, ApplyOptions{Wait: 2 * time.Second}); err != nil {
+		t.Fatal(err)
+	}
+	service.Probe = StatusProbe{Name: "model proxy", Run: func(context.Context) ServiceStatus {
+		return ServiceStatus{Name: "model proxy", State: ServiceOK}
+	}}
+	plan = PlanParts([]PartService{service}, off)
+	if len(plan) != 1 || plan[0].Action != ActionSkip || !strings.Contains(plan[0].Note, "still answers") {
+		t.Fatalf("plan = %+v", plan)
 	}
 }

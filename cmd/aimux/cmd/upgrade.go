@@ -78,7 +78,8 @@ func newUpgradeCmd() *cobra.Command {
 			"upgrade moves a service to its folder and restarts it whatever build it reports. Without names, every\n" +
 			"service upgrade handles is done:\n" +
 			"model-proxy, mcp-proxy and collector. Restarting the model proxy ends the turns in flight on it.\n" +
-			"The exit code is 1 if a service was not upgraded.",
+			"A service that was turned off is left as it is, with a note: it is upgraded once it is on again.\n" +
+			"The exit code is 1 if a service was not upgraded, or if one named on the command line is turned off.",
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ids, err := upgradeTargets(args)
@@ -105,8 +106,18 @@ func newUpgradeCmd() *cobra.Command {
 			probes := defaultStatusProbes(defaultStatusEnv(home, version, cfg))
 			servicesDir := filepath.Join(home, ".aimux", "services")
 			var services []controller.UpgradeService
+			var offNamed []string // asked for by name and turned off: the others are still upgraded
 			for _, svc := range upgradeServices {
 				if !slices.Contains(ids, svc.id) {
+					continue
+				}
+				// A service that was turned off is kept off by launchd, and an upgrade would have to start it.
+				// It is left as it is, and said to be.
+				if off, err := launchdKeptOff(runLaunchctl, os.Getuid(), svc.label); err == nil && off {
+					if slices.Contains(args, svc.id) {
+						offNamed = append(offNamed, svc.name)
+					}
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "%s: turned off, so left as it is; it is upgraded once it is turned on again\n", svc.name)
 					continue
 				}
 				probe := probes[slices.IndexFunc(probes, func(p controller.StatusProbe) bool { return p.Name == svc.name })]
@@ -126,7 +137,13 @@ func newUpgradeCmd() *cobra.Command {
 			results := controller.UpgradeServices(ctx, services, controller.UpgradeOptions{
 				Source: source, Build: version, DryRun: dryRun,
 			})
-			return writeUpgrade(cmd.OutOrStdout(), version, servicesDir, results, args, dryRun, jsonOutput)
+			if err := writeUpgrade(cmd.OutOrStdout(), version, servicesDir, results, args, dryRun, jsonOutput); err != nil {
+				return err
+			}
+			if len(offNamed) > 0 {
+				return fmt.Errorf("%s: turned off, so not upgraded; turn it on first, then upgrade it", strings.Join(offNamed, ", "))
+			}
+			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be done; change nothing")

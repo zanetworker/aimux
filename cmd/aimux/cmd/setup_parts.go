@@ -8,9 +8,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/controller"
@@ -51,7 +53,59 @@ func (j launchdPartJob) Write(data []byte) error {
 	return os.Rename(temp.Name(), path)
 }
 
-func (j launchdPartJob) Reload() error { return j.job.Restart() }
+// Reload makes launchd run what the file says, started afresh. A job that Stop disabled is allowed again first.
+func (j launchdPartJob) Reload() error {
+	agent := j.job.agent
+	// "enable" on a job that is not disabled does nothing; its failure would show in the reload that follows.
+	_, _ = agent.Run("launchctl", "enable", fmt.Sprintf("gui/%d/%s", agent.UID, agent.Label))
+	return j.job.Restart()
+}
+
+// KeptOff reports whether launchd has been told not to load the job.
+func (j launchdPartJob) KeptOff() (bool, error) {
+	agent := j.job.agent
+	return launchdKeptOff(agent.Run, agent.UID, agent.Label)
+}
+
+var launchdDisabled = regexp.MustCompile(`"([^"]+)"\s*=>\s*(disabled|true)`)
+
+// launchdKeptOff reads launchd's list of jobs it has been told not to load.
+func launchdKeptOff(run func(string, ...string) ([]byte, error), uid int, label string) (bool, error) {
+	out, err := run("launchctl", "print-disabled", fmt.Sprintf("gui/%d", uid))
+	if err != nil {
+		return false, fmt.Errorf("ask launchd which jobs are kept off: %w", err)
+	}
+	for _, match := range launchdDisabled.FindAllSubmatch(out, -1) {
+		if string(match[1]) == label {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// Stop unloads the job and tells launchd not to load it again, at a crash or at the next login, until Reload.
+// Disabled first: a job unloaded and still allowed could be brought back before it is marked.
+func (j launchdPartJob) Stop() error {
+	agent := j.job.agent
+	target := fmt.Sprintf("gui/%d/%s", agent.UID, agent.Label)
+	if out, err := agent.Run("launchctl", "disable", target); err != nil {
+		return fmt.Errorf("tell launchd to keep the job off: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	out, bootErr := agent.Run("launchctl", "bootout", target)
+	// bootout returns before launchd has let go of the job; stopped means it is gone.
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(100 * time.Millisecond) {
+		loaded, err := agent.Loaded()
+		if err == nil && !loaded {
+			return nil
+		}
+		if !time.Now().Before(deadline) {
+			if bootErr != nil {
+				return fmt.Errorf("unload the job: %w (%s)", bootErr, strings.TrimSpace(string(out)))
+			}
+			return errors.New("launchd still has the job ten seconds after it was told to unload it")
+		}
+	}
+}
 
 func (j launchdPartJob) Loaded() (bool, error) { return j.job.agent.Loaded() }
 
@@ -92,6 +146,9 @@ func partServices(home, version string, cfg config.Config) []controller.PartServ
 // setupPartsOpts is how `aimux setup --check` or `--apply` was asked for.
 type setupPartsOpts struct {
 	apply, yes, asJSON bool
+	// onlyPart, when set, limits what is planned and applied to that part. A command about one part does not
+	// carry out what the file says about another: a stop left pending there is not a side effect of this one.
+	onlyPart string
 	// ask puts a yes-or-no question to the owner; nil when there is nobody to ask.
 	ask func(prompt string) bool
 }
@@ -127,9 +184,16 @@ func runSetupParts(ctx context.Context, configPath string, services []controller
 		}
 		return errors.New("nothing was changed: fix the settings first")
 	}
-	plan := controller.PlanParts(services, s)
+	planFor := func(s parts.Settings) []controller.JobChange {
+		plan := controller.PlanParts(services, s)
+		if o.onlyPart != "" {
+			plan = slices.DeleteFunc(plan, func(c controller.JobChange) bool { return c.Part != o.onlyPart })
+		}
+		return plan
+	}
+	plan := planFor(s)
 	pending := slices.ContainsFunc(plan, func(c controller.JobChange) bool {
-		return c.Action == controller.ActionAdopt || c.Action == controller.ActionChange || c.Action == controller.ActionStart
+		return c.Action == controller.ActionAdopt || c.Action == controller.ActionChange || c.Action == controller.ActionStart || c.Action == controller.ActionStop
 	})
 	if !o.apply || !pending {
 		switch {
@@ -161,19 +225,34 @@ func runSetupParts(ctx context.Context, configPath string, services []controller
 		}
 		return nil
 	}
-	var restarting []string
+	var restarting, stopping []string
 	for _, line := range plan {
-		if line.Restarts {
+		switch {
+		case line.Action == controller.ActionStop:
+			stopping = append(stopping, parts.MustService(line.Service).Name)
+		case line.Restarts:
 			restarting = append(restarting, parts.MustService(line.Service).Name)
 		}
 	}
 	if !o.asJSON {
 		writePartsPlan(out, configPath, s, plan, pending, true)
 	}
-	if len(restarting) > 0 && !o.yes {
-		question := fmt.Sprintf("\nRestart the %s now? Turns in flight on it end. [y/N] ", strings.Join(restarting, " and the "))
+	if len(restarting)+len(stopping) > 0 && !o.yes {
+		var doing []string
+		if len(restarting) > 0 {
+			doing = append(doing, "restart the "+strings.Join(restarting, " and the "))
+		}
+		if len(stopping) > 0 {
+			doing = append(doing, "stop the "+strings.Join(stopping, " and the "))
+		}
+		what := strings.Join(doing, ", and ")
+		question := fmt.Sprintf("\n%s now? Turns in flight end", strings.ToUpper(what[:1])+what[1:])
+		if len(stopping) > 0 {
+			question += ", and sessions that go through a stopped service get no answer until it is turned on again"
+		}
+		question += ". [y/N] "
 		if o.ask == nil {
-			return fmt.Errorf("%w: this restarts the %s; run aimux setup --apply --yes to agree", errNeedsYes, strings.Join(restarting, " and the "))
+			return fmt.Errorf("%w: this would %s; run aimux setup --apply --yes to agree", errNeedsYes, what)
 		}
 		if !o.ask(question) {
 			return errNotAgreed
@@ -183,7 +262,7 @@ func runSetupParts(ctx context.Context, configPath string, services []controller
 		if s, err = parts.Load(configPath); err != nil {
 			return err
 		}
-		if len(s.Validate()) > 0 || !samePlan(plan, controller.PlanParts(services, s)) {
+		if len(s.Validate()) > 0 || !samePlan(plan, planFor(s)) {
 			return fmt.Errorf("%w; nothing was changed. Run it again", controller.ErrStalePlan)
 		}
 	}
@@ -259,6 +338,8 @@ func writePartsPlan(out io.Writer, configPath string, s parts.Settings, plan []c
 			will, detail = "restart", "from: "+printableArgs(line.Was)+"\n\t\t\tto:   "+printableArgs(line.Now)
 		case controller.ActionStart:
 			will, detail = "start", "its job is as the settings state, and it is not running"
+		case controller.ActionStop:
+			will, detail = "stop", "the settings turn this part off; it stays off until turned on again"
 		case controller.ActionSkip:
 			will = "be left alone"
 		}
