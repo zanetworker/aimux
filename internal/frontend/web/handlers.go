@@ -1,13 +1,14 @@
 package web
 
 import (
-	"errors"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -1259,4 +1260,42 @@ func (s *Server) handleFocus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = json.NewEncoder(w).Encode(res)
+}
+
+// handleMeter serves the ledger's meter: the model calls that passed the model proxy, summed per session, model,
+// day or role. It is the report `aimux cost` prints, from the same function, so the two cannot disagree. Query:
+// since (a duration, a number of days as 7d, or all; default 24h), by (session, model, day or role; default
+// session), session (an id or the start of one).
+func (s *Server) handleMeter(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	since := query.Get("since")
+	if since == "" {
+		since = "24h"
+	}
+	w.Header().Set("Content-Type", "application/json")
+	opts, err := controller.ParseMeterOptions(since, query.Get("by"), query.Get("session"), time.Now())
+	if err == nil {
+		dir := s.ledgerDir
+		if dir == "" {
+			home, homeErr := os.UserHomeDir()
+			if homeErr != nil {
+				http.Error(w, `{"error":"the home folder is not known, so the ledger cannot be found"}`, http.StatusInternalServerError)
+				return
+			}
+			dir = filepath.Join(home, ".aimux", "ledger")
+		}
+		var report controller.MeterReport
+		if report, err = controller.Meter(dir, opts); err == nil {
+			if encodeErr := json.NewEncoder(w).Encode(report); encodeErr != nil {
+				debuglog.Log("encode meter response: %v", encodeErr)
+			}
+			return
+		}
+	}
+	status := http.StatusInternalServerError
+	if errors.Is(err, controller.ErrMeterBy) || errors.Is(err, controller.ErrMeterSince) || errors.Is(err, controller.ErrAmbiguousSession) {
+		status = http.StatusBadRequest
+	}
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 }

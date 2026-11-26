@@ -36,6 +36,8 @@ type Server struct {
 	cfg              config.Config
 	taskProvider     tasks.Provider
 	recentDirsFn     func(int) []RecentDirInfo
+	// ledgerDir is where /api/meter reads the ledger; empty: ~/.aimux/ledger.
+	ledgerDir string
 	searchFn         func(query string, includeAutomated bool) ([]search.Result, error)
 	composeEngine    *aimuxcompose.Engine
 	sessionStore     *controller.SessionStore
@@ -54,6 +56,9 @@ func NewServer(port int) *Server {
 }
 
 // SetFocuser replaces how the server raises an agent's terminal pane.
+// SetLedgerDir says where the ledger is read from, for /api/meter. Unset, it is ~/.aimux/ledger.
+func (s *Server) SetLedgerDir(dir string) { s.ledgerDir = dir }
+
 func (s *Server) SetFocuser(f controller.Focuser) {
 	s.focuser = f
 }
@@ -210,6 +215,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("POST /api/insight", s.handleInsight)
 
 	mux.HandleFunc("GET /api/costs", s.handleCosts)
+	mux.HandleFunc("GET /api/meter", s.handleMeter)
 	mux.HandleFunc("GET /api/agents", s.handleAgents)
 	mux.HandleFunc("GET /api/agent-configs", s.handleAgentConfigs)
 	mux.HandleFunc("GET /api/environments", s.handleEnvironments)

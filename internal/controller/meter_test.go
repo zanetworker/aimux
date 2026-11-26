@@ -273,3 +273,28 @@ func TestMeter_ByRole(t *testing.T) {
 		t.Errorf("subagent row %+v", rows["subagent"])
 	}
 }
+
+// The words a frontend takes for "how far back" and "grouped by what" are read in one place.
+func TestParseMeterOptions(t *testing.T) {
+	now := time.Date(2026, 11, 26, 12, 0, 0, 0, time.UTC)
+	for since, want := range map[string]time.Time{
+		"90m": now.Add(-90 * time.Minute), "24h": now.Add(-24 * time.Hour), "7d": now.Add(-7 * 24 * time.Hour), "all": {},
+	} {
+		opts, err := ParseMeterOptions(since, "role", "abc", now)
+		if err != nil || !opts.Since.Equal(want) || opts.By != MeterByRole || opts.Session != "abc" {
+			t.Errorf("since %s: %+v, %v", since, opts, err)
+		}
+	}
+	if _, err := ParseMeterOptions("24h", "week", "", now); !errors.Is(err, ErrMeterBy) {
+		t.Errorf("by week: %v", err)
+	}
+	for _, bad := range []string{"soon", "-3h", "0", "99999999d", ""} {
+		if _, err := ParseMeterOptions(bad, "session", "", now); !errors.Is(err, ErrMeterSince) {
+			t.Errorf("since %q: %v", bad, err)
+		}
+	}
+	// An empty grouping is the default one.
+	if opts, err := ParseMeterOptions("all", "", "", now); err != nil || opts.By != MeterBySession {
+		t.Errorf("no grouping: %+v, %v", opts, err)
+	}
+}
