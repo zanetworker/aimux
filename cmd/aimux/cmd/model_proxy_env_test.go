@@ -55,7 +55,9 @@ func TestProxyEnv_PrintsWhatAShellCanEval(t *testing.T) {
 	if err := modelProxyEnv(context.Background(), envOpts{port: port}, testKey, noProviderFlags, &stdout, &stderr); err != nil {
 		t.Fatal(err)
 	}
-	want := "export ANTHROPIC_BASE_URL='http://127.0.0.1:" + strconv.Itoa(port) + "/k/" + envTestKey + "' &&\nunset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN &&\nexport AIMUX_MODEL_PROXY_ENV='engines'\n"
+	want := "export ANTHROPIC_BASE_URL='http://127.0.0.1:" + strconv.Itoa(port) + "/k/" + envTestKey + "' &&\nunset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN &&\nexport AIMUX_MODEL_PROXY_ENV='engines' &&\n" +
+		"export ANTHROPIC_CUSTOM_MODEL_OPTION='codex:gpt-6.2-sol' &&\nexport ANTHROPIC_CUSTOM_MODEL_OPTION_NAME='Codex gpt-6.2-sol' &&\n" +
+		"export ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION='aimux proxy, on your ChatGPT plan' &&\nexport AIMUX_MODEL_PROXY_PICKER='codex:gpt-6.2-sol'\n"
 	if stdout.String() != want {
 		t.Fatalf("stdout =\n%s\nwant\n%s", stdout.String(), want)
 	}
@@ -290,5 +292,43 @@ func TestProxyEnv_TheKeyDoesNotFollowAnAddressThatCouldNotBeSet(t *testing.T) {
 	out, _ := cmd.Output()
 	if strings.Contains(string(out), envTestKey) {
 		t.Error("the proxy key was exported although the address could not be set")
+	}
+}
+
+// A picker entry of the owner's own is left alone, going on and coming off; aimux's own entry goes with --off.
+func TestProxyEnv_ThePickerEntry(t *testing.T) {
+	port := proxyAnswering(t, "codex", "anthropic")
+	own := func(k string) string {
+		return map[string]string{"ANTHROPIC_CUSTOM_MODEL_OPTION": "my-gateway/opus"}[k]
+	}
+	var stdout, stderr bytes.Buffer
+	if err := modelProxyEnv(context.Background(), envOpts{port: port}, testKey, own, &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stdout.String(), "ANTHROPIC_CUSTOM_MODEL_OPTION") || !strings.Contains(stderr.String(), "/model codex:") {
+		t.Fatalf("stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	noKey := func(context.Context) (string, error) { return "", errors.New("must not be asked") }
+	// aimux's own entry goes; the owner's stays, also when it is a Codex model aimux did not set.
+	for _, tc := range []struct {
+		value, marker string
+		gone          bool
+	}{
+		{"codex:gpt-6.2-sol", "codex:gpt-6.2-sol", true},
+		{"my-gateway/opus", "", false},
+		{"codex:gpt-6.2-astra", "", false},
+		{"codex:gpt-6.2-astra", "codex:gpt-6.2-sol", false},
+	} {
+		value, gone := tc.value, tc.gone
+		shell := func(k string) string {
+			return map[string]string{"ANTHROPIC_CUSTOM_MODEL_OPTION": tc.value, "AIMUX_MODEL_PROXY_PICKER": tc.marker, "AIMUX_MODEL_PROXY_ENV": "engines"}[k]
+		}
+		var off bytes.Buffer
+		if err := modelProxyEnv(context.Background(), envOpts{port: 1, off: true}, noKey, shell, &off, &stderr); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(off.String(), "ANTHROPIC_CUSTOM_MODEL_OPTION") != gone {
+			t.Errorf("%s: --off printed %q", value, off.String())
+		}
 	}
 }

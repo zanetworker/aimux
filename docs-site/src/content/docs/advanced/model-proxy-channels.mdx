@@ -102,7 +102,7 @@ claude --model codex:gpt-6.2-sol           # answered by Codex
 eval "$(aimux model proxy env --off)"      # back to Anthropic directly
 ```
 
-`aimux model proxy env` prints a few lines for the shell: it sets `ANTHROPIC_BASE_URL` to the proxy's address with the key as its prefix, unsets `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` so Claude Code uses your Claude login, and leaves a marker saying it did. It says nothing about the model; a session uses whatever model you give it. Sessions started from that shell, and the sessions they start, go through the proxy. Other shells are untouched.
+`aimux model proxy env` prints a few lines for the shell: it sets `ANTHROPIC_BASE_URL` to the proxy's address with the key as its prefix, unsets `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` so Claude Code uses your Claude login, and leaves a marker saying it did. It does not choose the model a session starts on; that stays whatever you give it. It does add one Codex entry to the `/model` picker of those sessions, so switching engine is a choice from the list, unless the shell already has a picker entry of its own. Sessions started from that shell, and the sessions they start, go through the proxy. Other shells are untouched.
 
 The first line is written in two steps on purpose. `eval "$(aimux model proxy env)"` also works, but when the command fails it prints nothing, `eval` of nothing succeeds, and the next `claude` would run outside the proxy without saying so. With `&&` a failure stops there.
 

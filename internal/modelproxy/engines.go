@@ -84,7 +84,8 @@ func shellQuote(text string) string {
 // base URL and the marker always go. The API key variable and the model go when the marker says the Codex form
 // set them. apiKeyIsProxyKey covers a shell set before the marker existed: its API key variable goes when it is
 // known to hold the proxy key. A key or a model of the owner's own stays.
-func SessionEnvOff(marker string, apiKeyIsProxyKey bool) []string {
+// pickerIsOurs: the shell's picker entry is the one SessionEnvPicker set, so it goes too.
+func SessionEnvOff(marker string, apiKeyIsProxyKey, pickerIsOurs bool) []string {
 	names := "unset ANTHROPIC_BASE_URL " + SessionEnvMarker
 	if marker == SessionEnvCodexed || apiKeyIsProxyKey {
 		names += " ANTHROPIC_API_KEY"
@@ -92,7 +93,35 @@ func SessionEnvOff(marker string, apiKeyIsProxyKey bool) []string {
 	if marker == SessionEnvCodexed {
 		names += " ANTHROPIC_MODEL"
 	}
+	if pickerIsOurs {
+		names += " " + PickerVar + " " + PickerVar + "_NAME " + PickerVar + "_DESCRIPTION " + PickerMarker
+	}
 	return []string{names}
+}
+
+// PickerVar is the variable Claude Code reads, when it starts, for one extra entry in its /model picker.
+const PickerVar = "ANTHROPIC_CUSTOM_MODEL_OPTION"
+
+// SessionEnvPicker is the shell lines that put a Codex model in the /model picker of sessions started from that
+// shell, so switching engine is a choice from the list and not a name to remember. model is a Codex model's
+// name, as ValidCodexModel accepts it.
+func SessionEnvPicker(model string) []string {
+	return []string{
+		"export " + PickerVar + "='codex:" + model + "'",
+		"export " + PickerVar + "_NAME='Codex " + model + "'",
+		"export " + PickerVar + "_DESCRIPTION='aimux proxy, on your ChatGPT plan'",
+		"export " + PickerMarker + "='codex:" + model + "'",
+	}
+}
+
+// PickerMarker is a variable SessionEnvPicker sets beside the entry, holding the entry it set. An entry is
+// aimux's only while the two agree: one the owner set, a Codex one included, is never replaced or removed.
+const PickerMarker = "AIMUX_MODEL_PROXY_PICKER"
+
+// PickerIsOurs reports whether value, the shell's picker entry, is the one SessionEnvPicker set, given what
+// PickerMarker holds in that shell.
+func PickerIsOurs(value, marker string) bool {
+	return value != "" && value == marker
 }
 
 // credentials is what a request carried, read once. It holds no credential, only which were present.
