@@ -532,9 +532,19 @@ func TestSessionEnv(t *testing.T) {
 		{"", true, "unset ANTHROPIC_BASE_URL AIMUX_MODEL_PROXY_ENV ANTHROPIC_API_KEY"},
 		{"something-else", false, "unset ANTHROPIC_BASE_URL AIMUX_MODEL_PROXY_ENV"},
 	} {
-		if off := SessionEnvOff(tc.marker, tc.key); len(off) != 1 || off[0] != tc.want {
+		if off := SessionEnvOff(tc.marker, tc.key, false); len(off) != 1 || off[0] != tc.want {
 			t.Errorf("SessionEnvOff(%q, %v) = %q", tc.marker, tc.key, off)
 		}
+	}
+	// The picker entry: Codex shows in /model for sessions from this shell, and goes again with --off.
+	picker := SessionEnvPicker("gpt-6.2-sol")
+	wantPicker := []string{"export ANTHROPIC_CUSTOM_MODEL_OPTION='codex:gpt-6.2-sol'", "export ANTHROPIC_CUSTOM_MODEL_OPTION_NAME='Codex gpt-6.2-sol'",
+		"export ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION='aimux proxy, on your ChatGPT plan'", "export AIMUX_MODEL_PROXY_PICKER='codex:gpt-6.2-sol'"}
+	if !slices.Equal(picker, wantPicker) {
+		t.Errorf("SessionEnvPicker = %q", picker)
+	}
+	if off := SessionEnvOff("engines", false, true); len(off) != 1 || off[0] != "unset ANTHROPIC_BASE_URL AIMUX_MODEL_PROXY_ENV ANTHROPIC_CUSTOM_MODEL_OPTION ANTHROPIC_CUSTOM_MODEL_OPTION_NAME ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION AIMUX_MODEL_PROXY_PICKER" {
+		t.Errorf("SessionEnvOff with the picker entry = %q", off)
 	}
 	codex, err := SessionEnvCodex(7385, "it's a key", "gpt-6.2-sol")
 	wantCodex := []string{"export ANTHROPIC_BASE_URL='http://127.0.0.1:7385'", `export ANTHROPIC_API_KEY='it'\''s a key'`, "export ANTHROPIC_MODEL='codex:gpt-6.2-sol'", "unset ANTHROPIC_AUTH_TOKEN", "export AIMUX_MODEL_PROXY_ENV='codex'"}

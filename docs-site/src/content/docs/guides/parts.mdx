@@ -135,6 +135,16 @@ Moving the model proxy to another port moves `aimux status` and `aimux upgrade` 
 
 Making a job for a service that has none is not built yet: `--check` says so for that part and `--apply` leaves it as it is.
 
+## Switch engine inside a session
+
+After `eval "$(aimux model proxy env)"`, sessions started from that shell list a Codex model in `/model`, next to the Claude ones, so switching engine is a choice from the list:
+
+```text
+9. Codex gpt-6.2-sol     aimux proxy, on your ChatGPT plan
+```
+
+Any other model the proxy answers is chosen by name: `/model codex:gpt-6.2-astra`, or `/model <upstream>:<model>` for a named upstream. `/model` and a Claude model goes back. Claude Code reads the entry when it starts, so a session that was already running needs `claude --resume` from the shell to show it. Claude Code has room for one such entry: when the shell already has one of its own (`ANTHROPIC_CUSTOM_MODEL_OPTION`), aimux leaves it and says to switch by name. `aimux model proxy env --off` removes the entry again, and only when it is aimux's.
+
 ## See where a shell's sessions go
 
 A session goes through the model proxy only when the shell that started it points at the proxy (`aimux model proxy env`); every other session goes straight to Anthropic, or to whatever other gateway or provider its shell names, and is not recorded. To see which it is, and whether the proxy answers:

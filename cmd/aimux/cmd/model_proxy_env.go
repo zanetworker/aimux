@@ -26,8 +26,10 @@ func newModelProxyEnvCmd() *cobra.Command {
 		Long: "Prints lines for eval. After\n\n  eval \"$(aimux model proxy env)\"\n\n" +
 			"Claude Code sessions started from that shell go through the model proxy: a Claude model is answered by " +
 			"Anthropic on your own Claude login, a codex: model by Codex, and a <name>: model by that named upstream when the proxy has one. It sets ANTHROPIC_BASE_URL, with the " +
-			"proxy key in it, and unsets ANTHROPIC_API_KEY and ANTHROPIC_AUTH_TOKEN so the login is used. It says " +
-			"nothing about which model a session uses. It needs a running proxy that was started with --anthropic.\n\n" +
+			"proxy key in it, and unsets ANTHROPIC_API_KEY and ANTHROPIC_AUTH_TOKEN so the login is used. It also " +
+			"adds a Codex model to the /model picker of those sessions (ANTHROPIC_CUSTOM_MODEL_OPTION, which Claude Code " +
+			"reads when it starts), unless the shell already has a picker entry of its own. It says " +
+			"nothing about which model a session starts on. It needs a running proxy that was started with --anthropic.\n\n" +
 			"The output holds the proxy key: it is refused when it would be shown on a terminal, and a shell with " +
 			"tracing on (set -x) would print it. When this command fails it prints nothing, and eval of nothing " +
 			"succeeds, so in a script use: lines=\"$(aimux model proxy env)\" && eval \"$lines\".\n\n" +
@@ -97,7 +99,7 @@ func modelProxyEnv(ctx context.Context, o envOpts, key func(context.Context) (st
 			}
 			held = getenv("ANTHROPIC_API_KEY") == secret
 		}
-		_, err := fmt.Fprintln(stdout, strings.Join(modelproxy.SessionEnvOff(marker, held), "\n"))
+		_, err := fmt.Fprintln(stdout, strings.Join(modelproxy.SessionEnvOff(marker, held, modelproxy.PickerIsOurs(getenv(modelproxy.PickerVar), getenv(modelproxy.PickerMarker))), "\n"))
 		return err
 	}
 	// With one of these set, Claude Code talks to that provider and never reads the base URL.
@@ -151,10 +153,17 @@ func modelProxyEnv(ctx context.Context, o envOpts, key func(context.Context) (st
 		// ask Anthropic for a Codex model.
 		lines = append(lines, "unset ANTHROPIC_MODEL")
 	}
+	// Codex in the /model picker, unless the shell has a picker entry of the owner's own: there is room for one.
+	how := "pick Codex in /model"
+	if own := getenv(modelproxy.PickerVar); own == "" || modelproxy.PickerIsOurs(own, getenv(modelproxy.PickerMarker)) {
+		lines = append(lines, modelproxy.SessionEnvPicker(modelproxy.DefaultCodexModel)...)
+	} else {
+		how = "this shell already has a picker entry of its own, so switch by name: /model codex:" + modelproxy.DefaultCodexModel
+	}
 	if _, err := fmt.Fprintln(stdout, strings.Join(lines, " &&\n")); err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintf(stderr, "Claude Code sessions started from this shell now go through the model proxy on port %d: "+
-		"Claude models on your Claude login, codex: models on Codex. Undo with: eval \"$(aimux model proxy env --off)\"\n", port)
+		"Claude models on your Claude login, codex: models on Codex (%s). Undo with: eval \"$(aimux model proxy env --off)\"\n", port, how)
 	return nil
 }
