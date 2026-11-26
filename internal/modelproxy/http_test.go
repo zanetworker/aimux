@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -391,6 +392,52 @@ func TestClassifyFailureTellsATimeoutFromACancellation(t *testing.T) {
 	} {
 		if got := classifyFailure(tc.err); got != tc.want {
 			t.Errorf("classifyFailure(%v) = %q, want %q", tc.err, got, tc.want)
+		}
+	}
+}
+
+// A Codex turn that fails because the conversation no longer fits is told to the client as the Messages API says
+// "too long", which Claude Code recognises and answers by compacting. As a server error it was retried ten
+// times, each one rebuilding the same conversation and failing the same way.
+func TestHandler_ACodexContextOverflowIsToldAsPromptTooLong(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		backend, _ := newFakeBackend(t)
+		history := filepath.Join(t.TempDir(), "requests.jsonl")
+		log, err := OpenRequestLog(history, 1<<20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		handler := NewHandler(backend, testKey, WithRequestLog(log))
+		body := fmt.Sprintf(`{"model":"codex:gpt-6.2-sol","max_tokens":64,"stream":%v,"messages":[{"role":"user","content":"context-overflow"}]}`, streaming)
+		res := request(handler, http.MethodPost, "/v1/messages", body)
+		_ = log.Close()
+		text := res.Body.String()
+		if !strings.Contains(text, `"invalid_request_error"`) || !strings.Contains(text, `"prompt is too long: `) || strings.Contains(text, `"api_error"`) {
+			t.Fatalf("streaming %v: HTTP %d: %s", streaming, res.Code, text)
+		}
+		if !streaming && res.Code != http.StatusBadRequest {
+			t.Errorf("HTTP %d, want 400: a 5xx is retried", res.Code)
+		}
+		recorded, err := os.ReadFile(history) // #nosec G304 -- a file this test just wrote
+		if err != nil || !strings.Contains(string(recorded), `"error":"context_too_long"`) {
+			t.Errorf("streaming %v: history = %s (%v)", streaming, recorded, err)
+		}
+	}
+}
+
+func TestClassifyFailure_AContextOverflow(t *testing.T) {
+	for _, message := range []string{
+		"codex turn failed: Error running remote compact task: Codex ran out of room in the model's context window. Start a new thread or clear earlier history before retrying.",
+		"codex turn failed: context_length_exceeded",
+	} {
+		if got := classifyFailure(errors.New(message)); got != "context_too_long" {
+			t.Errorf("%q = %q", message, got)
+		}
+	}
+	// Another failed turn is still a failed turn, and is still retried: also one that only mentions a window.
+	for _, message := range []string{"codex turn failed: the model is overloaded", "codex turn failed: could not read the context window setting"} {
+		if got := classifyFailure(errors.New(message)); got != "turn_failed" {
+			t.Errorf("%q = %q", message, got)
 		}
 	}
 }
