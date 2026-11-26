@@ -52,7 +52,7 @@ Open `http://localhost:9090` in your browser.
 | `aimux spawn claude --dir ./proj` | Start a new agent session |
 | `aimux resume <id>` | Resume a previous session |
 | `aimux jump <id>` | Bring a running session's iTerm2 pane to the front (session ID, unique prefix or PID) |
-| `aimux setup` | Check every concern and run only the missing setup steps (tool registry, clients, sandbox, Chrome host); on a terminal, offer to review changed tools |
+| `aimux setup` | On a terminal, list the parts and offer to turn them on; then (unless Sandboxes is turned off in `~/.aimux/config.yaml`) check every concern and run only the missing setup steps (tool registry, clients, sandbox, Chrome host); on a terminal, offer to review changed tools |
 | `aimux doctor` | Read-only checks with one fix per problem; exit 1 on any failure, warnings exit 0 ([Troubleshooting](/guides/troubleshooting/)) |
 | `aimux agent-context` | Machine-readable CLI schema for agents |
 | `aimux profile save <name>` | Save a named configuration bundle (v1; `aimux profile migrate` converts it to a [profile](/guides/profiles/)) |
@@ -68,7 +68,7 @@ aimux setup --extension-id <id>   # the id is in chrome://extensions once the Wi
 aimux doctor                      # read-only: what is still wrong, and the fix for each
 ```
 
-`aimux setup` checks the sandbox, tools, router, browser, OpenShell gateway and tool gateway worker and runs only what is missing (it reports a missing worker with `aimux mcp proxy gateway install` but does not install it): it asks before each step on a terminal, and `--yes` runs them without asking. It ends with one line per concern (`✓`, `!` or `✗`) and a `Next:` line for each problem. Run it again any time; with nothing missing it changes nothing. It never approves a tool unless you answer yes to that tool's diff on a terminal. The [Wingman guide](/guides/wingman/) has the details and [Troubleshooting](/guides/troubleshooting/) lists every `aimux doctor` check.
+`aimux setup` checks the sandbox, tools, router, browser, OpenShell gateway and tool gateway worker and runs only what is missing (it reports a missing worker with `aimux mcp proxy gateway install` but does not install it): it asks before each step on a terminal, and `--yes` runs them without asking. It ends with one line per concern (`✓`, `!` or `✗`) and a `Next:` line for each problem. Run it again any time; with nothing missing, and no part chosen from the list it opens with on a terminal, it changes nothing. It never approves a tool unless you answer yes to that tool's diff on a terminal. The [Wingman guide](/guides/wingman/) has the details and [Troubleshooting](/guides/troubleshooting/) lists every `aimux doctor` check.
 
 ## Quick Tour
 

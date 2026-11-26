@@ -21,6 +21,8 @@ import (
 
 	"github.com/zanetworker/aimux/internal/autoroute"
 	"github.com/zanetworker/aimux/internal/config"
+	"github.com/zanetworker/aimux/internal/controller"
+	"github.com/zanetworker/aimux/internal/parts"
 	"github.com/zanetworker/aimux/internal/sandboxlaunch"
 	"github.com/zanetworker/aimux/internal/toolgateway"
 	"github.com/zanetworker/aimux/internal/toolreg"
@@ -28,8 +30,11 @@ import (
 	"syscall"
 )
 
-// setupSchemaVersion is the schema of `aimux setup --json` and `aimux doctor --json`.
+// setupSchemaVersion is the schema of `aimux doctor --json`, and of the other commands that share its checks.
 const setupSchemaVersion = "1"
+
+// setupJSONVersion is the schema of `aimux setup --json`: 2 added the parts list.
+const setupJSONVersion = "2"
 
 // Check and summary statuses, as setup and doctor report them.
 const (
@@ -106,7 +111,11 @@ func newSetupCmdWith(env frontEnv) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "setup",
 		Short: "Check every concern and run only the missing setup steps; on a terminal, offer to review changed tools",
-		Long: "setup checks the sandbox, tools, router, browser and OpenShell gateway, then runs only the steps that\n" +
+		Long: "On a terminal setup first lists the parts aimux is made of, on or off, and asks which to turn on, by\n" +
+			"number: each one chosen is stated in ~/.aimux/config.yaml and its service made to match, as aimux enable\n" +
+			"does. Enter turns nothing on. Nothing is asked without a terminal or with --json, which lists the parts.\n" +
+			"With sandboxes turned off in that file, the rest is not run.\n\n" +
+			"setup checks the sandbox, tools, router, browser and OpenShell gateway, then runs only the steps that\n" +
 			"are missing: the tool registry (migrating readonly.json once), clients.yaml, the sandbox image and\n" +
 			"provider, and the Chrome native host (with --extension-id, or when an id is pinned but the host is\n" +
 			"not registered). On a terminal it asks before each step; --yes runs them without asking; with no\n" +
@@ -114,7 +123,7 @@ func newSetupCmdWith(env frontEnv) *cobra.Command {
 			"Tools that need review are offered one by one, only on a terminal and never with --json: a tool is\n" +
 			"approved only after you answer yes to its diff and yes to approving it. --yes never approves tools.\n" +
 			"Ends with one line per concern (sandbox, tools, router, browser, gateway, worker: the tool gateway worker) and a Next: line per problem.\n" +
-			"Exit 0 unless a step failed.\n\n" +
+			"Exit 0 unless a step failed or a part chosen from the list could not be turned on.\n\n" +
 			"With --check or --apply it does something else: it compares the background services with the parts\n" +
 			"section of ~/.aimux/config.yaml. --check prints what would change and exits 1 when something would;\n" +
 			"--apply makes the services match, asking before a restart.",
@@ -135,6 +144,10 @@ func newSetupCmdWith(env frontEnv) *cobra.Command {
 				}
 				return runSetupParts(ctx, filepath.Join(env.Home, ".aimux", "config.yaml"), partServices(env.Home, c.Root().Version, cfg), opts, c.OutOrStdout())
 			}
+			o.partServices = func() []controller.PartService {
+				cfg, _ := config.Load(config.DefaultPath())
+				return partServices(env.Home, c.Root().Version, cfg)
+			}
 			return runSetup(c.Context(), env, o, c.OutOrStdout(), c.ErrOrStderr())
 		},
 	}
@@ -153,6 +166,8 @@ type setupOpts struct {
 	apply      bool
 	extID      string
 	sandboxDir string
+	// partServices are the services a part chosen on the menu is made to match with.
+	partServices func() []controller.PartService
 }
 
 // setupStep is one missing step: what it does and how to run it.
@@ -190,6 +205,71 @@ func runSetup(ctx context.Context, env frontEnv, o setupOpts, out, errOut io.Wri
 		if !jsonOutput {
 			_, _ = fmt.Fprintf(out, format+"\n", a...)
 		}
+	}
+
+	// The parts come first: what is on, and on a terminal the offer to turn more on.
+	configPath := filepath.Join(env.Home, ".aimux", "config.yaml")
+	settings, loadErr := parts.Load(configPath)
+	partsProblem := ""
+	switch {
+	case env.Home == "":
+		// Joined to nothing, the path would be a file in whatever folder this runs from.
+		settings, partsProblem = parts.Settings{}, "the home folder is not known, so the config file cannot be found; set HOME"
+	case loadErr != nil:
+		partsProblem = fmt.Sprintf("%s could not be read: %v", configPath, loadErr)
+	case len(settings.Validate()) > 0:
+		partsProblem = fmt.Sprintf("the parts section of %s has a problem; aimux setup --check says where", configPath)
+	}
+	var notOn []string
+	if interactive && partsProblem == "" && o.partServices != nil {
+		// A restart is always asked about here: --yes is about the setup steps below. Services are started
+		// through launchd, so elsewhere the parts are listed and none is offered.
+		var interrupted bool
+		notOn, interrupted = turnOnParts(ctx, in, out, env.GOOS == "darwin", partsChange{configPath: configPath, services: o.partServices,
+			ask: func(prompt string) bool { return ask(in, out, prompt, false) }})
+		if interrupted {
+			return errors.New("interrupted: setup stopped there, and nothing further was run")
+		}
+		settings, _ = parts.Load(configPath)
+	}
+	// A file with a problem is not reported part by part, as if it had been read.
+	menu := []controller.PartChoice{}
+	if partsProblem == "" {
+		menu = controller.PartsMenu(settings)
+	}
+	doc := func(steps []setupStep, approved []string, summary []summaryLine) map[string]any {
+		d := map[string]any{"schema_version": setupJSONVersion, "parts": menu, "steps": steps, "approved": approved, "summary": summary}
+		if partsProblem != "" {
+			d["parts_problem"] = partsProblem
+		}
+		return d
+	}
+	saidProblem := func() {
+		if partsProblem != "" {
+			_, _ = fmt.Fprintf(errOut, "Next: aimux setup --check (%s)\n", partsProblem)
+		}
+	}
+	notOnErr := func() error {
+		if len(notOn) == 0 {
+			return nil
+		}
+		return fmt.Errorf("not turned on: %s (the reason is above)", strings.Join(notOn, ", "))
+	}
+	// Everything below belongs to one part, Sandboxes. Turned off in the file, none of it runs: that much is
+	// plain whatever is wrong with another part.
+	sandboxesClear := !slices.ContainsFunc(settings.Validate(), func(p parts.Problem) bool { return strings.HasPrefix(p.Path, "parts.sandboxes") })
+	if sandboxes, ok := settings.Parts["sandboxes"]; loadErr == nil && sandboxesClear && ok && sandboxes.Enabled != nil && !*sandboxes.Enabled {
+		if jsonOutput {
+			if err := writeJSON(out, doc([]setupStep{}, []string{}, []summaryLine{})); err != nil {
+				return err
+			}
+		}
+		text("Sandboxes is off in %s: its checks and setup steps are not run.", configPath)
+		saidProblem()
+		return notOnErr()
+	}
+	if interactive {
+		text("Sandboxes")
 	}
 
 	sb := collectSandboxStatus(ctx, env.browserEnv, env.ProfileDir)
@@ -275,7 +355,7 @@ func runSetup(ctx context.Context, env frontEnv, o setupOpts, out, errOut io.Wri
 		if steps == nil {
 			steps = []setupStep{}
 		}
-		if err := writeJSON(out, map[string]any{"schema_version": setupSchemaVersion, "steps": steps, "approved": approved, "summary": summary}); err != nil {
+		if err := writeJSON(out, doc(steps, approved, summary)); err != nil {
 			return err
 		}
 	} else {
@@ -289,10 +369,101 @@ func runSetup(ctx context.Context, env frontEnv, o setupOpts, out, errOut io.Wri
 	for _, n := range next {
 		_, _ = fmt.Fprintf(errOut, "Next: %s\n", n)
 	}
+	saidProblem()
 	if len(failed) > 0 {
 		return fmt.Errorf("setup step failed: %s (see its output above)", strings.Join(failed, ", "))
 	}
-	return nil
+	return notOnErr()
+}
+
+// turnOnParts shows the parts and asks which to turn on, by number. Each one chosen is stated in the config file
+// and its service made to match, as `aimux enable` does. It returns the ids of those that could not be turned on;
+// why is printed where it happened. An empty answer, or none to read, turns nothing on. With offer false the parts
+// are listed and nothing is asked. interrupted: an interrupt arrived while a service was being changed; that
+// change was finished or put back, and nothing after it was begun.
+func turnOnParts(ctx context.Context, in *bufio.Reader, out io.Writer, offer bool, change partsChange) (notOn []string, interrupted bool) {
+	settings, _ := parts.Load(change.configPath)
+	menu := controller.PartsMenu(settings)
+	_, _ = fmt.Fprintln(out, "Parts")
+	offered := map[int]controller.PartChoice{}
+	for _, c := range menu {
+		number, about := "   ", c.About
+		if offer && c.Number > 0 {
+			number = fmt.Sprintf("%3d", c.Number)
+			offered[c.Number] = c
+		}
+		if c.Why != "" {
+			about += " (" + c.Why + ")"
+		}
+		_, _ = fmt.Fprintf(out, "%s  %-19s %-18s %s\n", number, c.Name, c.State, about)
+	}
+	_, _ = fmt.Fprintln(out)
+	if len(offered) == 0 {
+		return nil, false
+	}
+	var chosen []controller.PartChoice
+	for chosen == nil {
+		_, _ = fmt.Fprint(out, "Turn on (numbers, or Enter for none): ")
+		line, err := in.ReadString('\n')
+		words := strings.FieldsFunc(line, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' || r == '\n' || r == '\r' })
+		if len(words) == 0 {
+			if err != nil {
+				_, _ = fmt.Fprintln(out)
+			}
+			return nil, false
+		}
+		for _, word := range words {
+			var n int
+			if _, scanErr := fmt.Sscanf(word, "%d", &n); scanErr != nil || fmt.Sprint(n) != word || offered[n].ID == "" {
+				_, _ = fmt.Fprintf(out, "%s is not one of the numbers.\n", word)
+				chosen = nil
+				break
+			}
+			if !slices.ContainsFunc(chosen, func(c controller.PartChoice) bool { return c.ID == offered[n].ID }) {
+				chosen = append(chosen, offered[n])
+			}
+		}
+		if err != nil && chosen == nil {
+			return nil, false
+		}
+	}
+	for _, c := range chosen {
+		_, _ = fmt.Fprintf(out, "\n%s\n", c.Name)
+		one := change
+		one.part, one.needsService = c.ID, true
+		// An interrupt while a service is changed ends the wait; a service that did not come up still gets its job
+		// file back first, and then setup stops. At the question before a restart an interrupt ends the command
+		// as it does at any other question, so it is not caught while one is open.
+		applyCtx, cancel := context.WithCancel(ctx)
+		sig := make(chan os.Signal, 1)
+		watch := func() { signal.Notify(sig, os.Interrupt, syscall.SIGTERM) }
+		go func() {
+			select {
+			case <-sig:
+				cancel()
+			case <-applyCtx.Done():
+			}
+		}()
+		one.ask = func(prompt string) bool {
+			signal.Stop(sig)
+			defer watch()
+			return change.ask(prompt)
+		}
+		watch()
+		err := one.run(applyCtx, func(file string) error { return parts.EnablePart(file, c.ID) }, out)
+		signal.Stop(sig)
+		stopped := applyCtx.Err() != nil && ctx.Err() == nil
+		cancel()
+		if err != nil {
+			_, _ = fmt.Fprintf(out, "%s: %v\n", c.Name, err)
+			notOn = append(notOn, c.ID)
+		}
+		if stopped {
+			return notOn, true
+		}
+	}
+	_, _ = fmt.Fprintln(out)
+	return notOn, false
 }
 
 // sandboxPrepare is what aimux sandbox setup would do for sb: start the
