@@ -1,7 +1,10 @@
 package modelproxy
 
 import (
+	"errors"
+	"os"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -61,4 +64,49 @@ func ReadRequestFailures(path string, window time.Duration, now time.Time) (tota
 		return b.LastAt.Compare(a.LastAt)
 	})
 	return total, failures, incomplete, nil
+}
+
+// PassedOn is how many requests the proxy passed on to one engine other than Codex, and how many of them failed.
+type PassedOn struct {
+	Engine string
+	Count  int
+	Failed int
+}
+
+// ReadPassedOn counts, per engine, the requests since a time that the proxy passed on to another engine than
+// Codex, busiest first. It reads the request history at path only. A history that is not there is none.
+func ReadPassedOn(path string, since time.Time) ([]PassedOn, error) {
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	records, _, _, err := readRequestRecords(path, since)
+	if err != nil {
+		return nil, err
+	}
+	byEngine := map[string]*PassedOn{}
+	for _, record := range records {
+		if record.Outcome != "forwarded" || record.Detail == "" {
+			continue
+		}
+		p := byEngine[record.Detail]
+		if p == nil {
+			p = &PassedOn{Engine: record.Detail}
+			byEngine[record.Detail] = p
+		}
+		p.Count++
+		if record.Error != "" || record.Status >= 400 {
+			p.Failed++
+		}
+	}
+	var out []PassedOn
+	for _, p := range byEngine {
+		out = append(out, *p)
+	}
+	slices.SortFunc(out, func(a, b PassedOn) int {
+		if a.Count != b.Count {
+			return b.Count - a.Count
+		}
+		return strings.Compare(a.Engine, b.Engine)
+	})
+	return out, nil
 }

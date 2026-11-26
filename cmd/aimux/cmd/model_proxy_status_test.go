@@ -51,7 +51,7 @@ func fakeProxy(t *testing.T, status int, body string) (addr string, asked func()
 func TestModelProxyStatusReportsAHealthyProxy(t *testing.T) {
 	addr, asked := fakeProxy(t, http.StatusOK, healthJSON(t, fixtureHealth()))
 	var out bytes.Buffer
-	if err := modelProxyStatus(context.Background(), addr, "secret-key", &out, func() time.Time { return healthNow }); err != nil {
+	if err := modelProxyStatus(context.Background(), addr, "secret-key", "", &out, func() time.Time { return healthNow }); err != nil {
 		t.Fatalf("status returned %v", err)
 	}
 	text := out.String()
@@ -74,7 +74,7 @@ func TestModelProxyStatusReadsNaturallyForOneTurn(t *testing.T) {
 	health.Requests.Total, health.Requests.LastOKAt = 1, &justNow
 	addr, _ := fakeProxy(t, http.StatusOK, healthJSON(t, health))
 	var out bytes.Buffer
-	if err := modelProxyStatus(context.Background(), addr, "k", &out, func() time.Time { return healthNow }); err != nil {
+	if err := modelProxyStatus(context.Background(), addr, "k", "", &out, func() time.Time { return healthNow }); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"1 turn,", "last ok just now"} {
@@ -92,7 +92,7 @@ func TestModelProxyStatusFailsWhenDegraded(t *testing.T) {
 	health.Requests.LastError = "codex app-server exited"
 	addr, _ := fakeProxy(t, http.StatusServiceUnavailable, healthJSON(t, health))
 	var out bytes.Buffer
-	err := modelProxyStatus(context.Background(), addr, "secret-key", &out, func() time.Time { return healthNow })
+	err := modelProxyStatus(context.Background(), addr, "secret-key", "", &out, func() time.Time { return healthNow })
 	if err == nil {
 		t.Fatal("a degraded proxy returned no error, so the command would exit 0")
 	}
@@ -111,7 +111,7 @@ func TestModelProxyStatusReportsNotRunning(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	err = modelProxyStatus(context.Background(), addr, "secret-key", &out, time.Now)
+	err = modelProxyStatus(context.Background(), addr, "secret-key", "", &out, time.Now)
 	if err == nil || !strings.Contains(err.Error(), "not running") {
 		t.Fatalf("err = %v, want it to say the proxy is not running", err)
 	}
@@ -130,7 +130,7 @@ func TestModelProxyStatusRefusesARedirect(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	var out bytes.Buffer
-	err := modelProxyStatus(context.Background(), strings.TrimPrefix(srv.URL, "http://"), "secret-key", &out, time.Now)
+	err := modelProxyStatus(context.Background(), strings.TrimPrefix(srv.URL, "http://"), "secret-key", "", &out, time.Now)
 	if err == nil || !strings.Contains(err.Error(), "redirected") {
 		t.Fatalf("err = %v, want a refused redirect", err)
 	}
@@ -139,7 +139,7 @@ func TestModelProxyStatusRefusesARedirect(t *testing.T) {
 func TestModelProxyStatusReportsARejectedKey(t *testing.T) {
 	addr, _ := fakeProxy(t, http.StatusUnauthorized, `{"type":"error","error":{"message":"invalid or missing proxy key"}}`)
 	var out bytes.Buffer
-	err := modelProxyStatus(context.Background(), addr, "wrong-key", &out, time.Now)
+	err := modelProxyStatus(context.Background(), addr, "wrong-key", "", &out, time.Now)
 	if err == nil || !strings.Contains(err.Error(), "key") {
 		t.Fatalf("err = %v, want it to name the key", err)
 	}
@@ -180,5 +180,48 @@ func TestLedgerLine(t *testing.T) {
 		if got := ledgerLine(tc.ledger); got != tc.want {
 			t.Errorf("ledgerLine(%+v) = %q, want %q", tc.ledger, got, tc.want)
 		}
+	}
+}
+
+// Calls passed on to another engine are counted beside Codex's turns: a proxy that has only served Anthropic is
+// not shown as idle.
+func TestModelProxyStatusCountsWhatItPassedOn(t *testing.T) {
+	history := t.TempDir() + "/requests.jsonl"
+	log, err := modelproxy.OpenRequestLog(history, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	for _, r := range []modelproxy.Record{
+		{At: now.Add(-20 * time.Minute), Outcome: "forwarded", Detail: "anthropic", Status: 200},
+		{At: now.Add(-10 * time.Minute), Outcome: "forwarded", Detail: "anthropic", Status: 429, Error: "upstream_error"},
+		{At: now.Add(-5 * time.Minute), Outcome: "forwarded", Detail: "lab", Status: 200},
+		{At: now.Add(-4 * time.Minute), Outcome: "new_session", Status: 200},                  // a Codex turn: not passed on
+		{At: now.Add(-9 * time.Hour), Outcome: "forwarded", Detail: "anthropic", Status: 200}, // before this proxy started
+	} {
+		log.Record(r)
+	}
+	if err := log.Close(); err != nil {
+		t.Fatal(err)
+	}
+	health := fixtureHealth()
+	health.Requests = modelproxy.StageHealth{}
+	health.StartedAt = now.Add(-3 * time.Hour)
+	body, _ := json.Marshal(health)
+	addr, _ := fakeProxy(t, http.StatusOK, string(body))
+	var out bytes.Buffer
+	if err := modelProxyStatus(context.Background(), addr, "secret-key", history, &out, func() time.Time { return now }); err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+	for _, want := range []string{"Codex turns", "0 turns", "Passed on", "3 calls since it started", "anthropic 2 (1 failed)", "lab 1"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("no %q in:\n%s", want, text)
+		}
+	}
+	// With nothing passed on the row is left out, as before.
+	out.Reset()
+	if err := modelProxyStatus(context.Background(), addr, "secret-key", t.TempDir()+"/none.jsonl", &out, func() time.Time { return now }); err != nil || strings.Contains(out.String(), "Passed on") {
+		t.Fatalf("%v\n%s", err, out.String())
 	}
 }
