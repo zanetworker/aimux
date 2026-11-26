@@ -1,0 +1,17 @@
+flowchart LR
+  cfg["config file<br/>roles: subagent<br/>on_limit: report"]
+  env["aimux model proxy env<br/>sets Claude Code's own<br/>subagent default"]
+  cc["Claude Code session<br/>main: its own model<br/>subagents: the model the role names"]
+  proxy["model proxy<br/>picks the engine from<br/>the model named"]
+  role["facts of the call<br/>role: main, subagent,<br/>background or unknown"]
+  ant["Anthropic<br/>main conversation"]
+  cdx["Codex<br/>subagents"]
+  led["ledger<br/>engine, role, and a plan limit<br/>with what a fallback would need"]
+
+  cfg --> env --> cc
+  cc -- "main" --> proxy
+  cc -- "subagents" --> proxy
+  proxy --> role --> led
+  proxy --> ant
+  proxy --> cdx
+  ant -. "plan limit: reported" .-> led
