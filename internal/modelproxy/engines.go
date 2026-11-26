@@ -283,7 +283,7 @@ func serveForwardedMessage(w http.ResponseWriter, r, out *http.Request, path str
 		Duration: time.Since(timing.started), Usage: result.Usage, Error: failure,
 	})
 	if call != nil {
-		finishModelCall(call, timing.started, timing.firstByte, result.Usage, failure)
+		finishModelCall(call, timing.started, timing.firstByte, result.Usage, failure, timing.status)
 		call.ResponseModel, call.UsageUnknown = ledgerModel(result.Model), !result.UsageKnown
 		config.ledger.Write(*call)
 	}

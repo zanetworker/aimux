@@ -231,6 +231,10 @@ func TestHandler_AnthropicAnswerWithoutUsage(t *testing.T) {
 	if len(lines) != 1 || !lines[0].UsageUnknown || lines[0].InputTokens != 0 || lines[0].Outcome != "upstream_error" || lines[0].ResponseModel != "" {
 		t.Fatalf("ledger = %+v", lines)
 	}
+	// Why it failed is in the record: the status the session was given, here Anthropic's rate limit.
+	if lines[0].Status != http.StatusTooManyRequests {
+		t.Fatalf("status in the ledger = %d", lines[0].Status)
+	}
 }
 
 func TestHandler_CodexModelWithoutTheKeyIsRefused(t *testing.T) {
