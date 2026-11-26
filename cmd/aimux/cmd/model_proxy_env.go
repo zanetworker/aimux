@@ -101,7 +101,7 @@ func modelProxyEnv(ctx context.Context, o envOpts, key func(context.Context) (st
 		return err
 	}
 	// With one of these set, Claude Code talks to that provider and never reads the base URL.
-	for _, other := range []string{"CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"} {
+	for _, other := range modelproxy.OtherProviderVars {
 		if getenv(other) != "" {
 			return fmt.Errorf("this shell has %s set, so Claude Code would use that provider and not the model proxy; unset it first", other)
 		}
