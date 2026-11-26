@@ -144,8 +144,7 @@ func toolsChecks(ctx context.Context, env frontEnv) []doctorCheck {
 	regPath, legacy := toolreg.DefaultPath(home), toolreg.LegacyPath(home)
 	var cs []doctorCheck
 
-	_, regErr := os.Lstat(regPath)
-	if _, err := os.Stat(legacy); err == nil && errors.Is(regErr, fs.ErrNotExist) {
+	if legacyRegistryWaiting(home) {
 		cs = append(cs, doctorCheck{ID: "tools.legacy", Status: checkWarn,
 			Detail: regPath + " is absent and " + legacy + " is not migrated yet (it is read in its place)",
 			Fix:    "aimux setup --yes (migrates it once; the old file is kept as readonly.json.migrated)"})

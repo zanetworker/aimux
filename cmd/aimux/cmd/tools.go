@@ -141,12 +141,21 @@ func readRegistry(home string) (reg toolreg.Registry, note string, err error) {
 	if err != nil {
 		return toolreg.Registry{}, "", err
 	}
-	if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
-		if _, err := os.Stat(legacy); err == nil {
-			note = fmt.Sprintf("Note: %s is not migrated yet; read from %s (aimux setup migrates it)", path, legacy)
-		}
+	if legacyRegistryWaiting(home) {
+		note = fmt.Sprintf("Note: %s is not migrated yet; read from %s (aimux setup migrates it)", path, legacy)
 	}
 	return reg, note, nil
+}
+
+// legacyRegistryWaiting reports whether the old readonly.json is what is read and aimux setup would migrate it:
+// it exists, and neither tool-sources.yaml nor the newer servers.yaml does.
+func legacyRegistryWaiting(home string) bool {
+	if _, err := os.Stat(toolreg.LegacyPath(home)); err != nil {
+		return false
+	}
+	_, regErr := os.Lstat(toolreg.DefaultPath(home))
+	_, splitErr := os.Lstat(toolreg.ServersPath(home))
+	return errors.Is(regErr, fs.ErrNotExist) && splitErr != nil
 }
 
 // runnerBinding is toolsEnv.Runner over run: with ensure,
