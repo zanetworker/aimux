@@ -84,8 +84,9 @@ func shellQuote(text string) string {
 // base URL and the marker always go. The API key variable and the model go when the marker says the Codex form
 // set them. apiKeyIsProxyKey covers a shell set before the marker existed: its API key variable goes when it is
 // known to hold the proxy key. A key or a model of the owner's own stays.
-// pickerIsOurs: the shell's picker entry is the one SessionEnvPicker set, so it goes too.
-func SessionEnvOff(marker string, apiKeyIsProxyKey, pickerIsOurs bool) []string {
+// pickerIsOurs: the shell's picker entry is the one SessionEnvPicker set, so it goes too. rolesAreOurs: the same
+// for the subagent default SessionEnvRoles set; its marker goes whenever there is one.
+func SessionEnvOff(marker string, apiKeyIsProxyKey, pickerIsOurs bool, roles ...bool) []string {
 	names := "unset ANTHROPIC_BASE_URL " + SessionEnvMarker
 	if marker == SessionEnvCodexed || apiKeyIsProxyKey {
 		names += " ANTHROPIC_API_KEY"
@@ -96,7 +97,40 @@ func SessionEnvOff(marker string, apiKeyIsProxyKey, pickerIsOurs bool) []string 
 	if pickerIsOurs {
 		names += " " + PickerVar + " " + PickerVar + "_NAME " + PickerVar + "_DESCRIPTION " + PickerMarker
 	}
+	// roles[0]: the subagent default is aimux's own. roles[1]: a marker of it is in the shell.
+	if len(roles) > 0 && roles[0] {
+		names += " " + SubagentModelVar
+	}
+	if len(roles) > 1 && roles[1] {
+		names += " " + RolesMarker
+	}
 	return []string{names}
+}
+
+// The subagent role: Claude Code's own variable for the model its subagents use when they name none, and a
+// marker holding what aimux set there, by the same rule as the picker entry.
+const (
+	SubagentModelVar = "CLAUDE_CODE_SUBAGENT_MODEL"
+	RolesMarker      = "AIMUX_MODEL_PROXY_ROLES"
+)
+
+// roleModelName is a model a role may put into a shell line: an engine's name and a model, or a model alone.
+var roleModelName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/@:\[\]-]{0,127}$`)
+
+// SessionEnvRoles is the shell lines that make the owner's own subagents, those that name no model, use model in
+// sessions started from that shell. codex:default stands for the proxy's default Codex model at the time. ok is
+// false for a model that is not one, which is then put in no line.
+func SessionEnvRoles(model string) (lines []string, ok bool) {
+	if model == "codex:default" {
+		model = "codex:" + DefaultCodexModel
+	}
+	if !roleModelName.MatchString(model) {
+		return nil, false
+	}
+	return []string{
+		"export " + SubagentModelVar + "=" + shellQuote(model),
+		"export " + RolesMarker + "=" + shellQuote(model),
+	}, true
 }
 
 // PickerVar is the variable Claude Code reads, when it starts, for one extra entry in its /model picker.

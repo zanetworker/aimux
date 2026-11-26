@@ -48,7 +48,7 @@ The inference proxy has two sides. `serves` is the front: the APIs a client may 
 | `enabled` | an engine | Requests naming it are answered | On, for an engine that is listed. `codex` cannot be turned off |
 | `service_tier`, `binary` | `codex` | The tier (`priority` or `standard`) and the Codex program to run | What the installed job has |
 
-`models`, `roles` and `on_limit` are read and checked by this build, and nothing acts on them yet: no subagent is moved to another model and no limit is reported until the proxy and `aimux model proxy env` use them, which comes next. Setting them now only records your choice.
+`models` and `roles` reach a session through its shell: `aimux model proxy env` sets Claude Code's own variable for the model subagents use by default, so they hold for sessions started after that and not for one already running. `on_limit` is read and checked, and nothing acts on it yet.
 
 Three rules are worth knowing before you edit it:
 
@@ -139,6 +139,42 @@ A service of a part that is on, whose job is right and which does not answer, is
 Moving the model proxy to another port moves `aimux status` and `aimux upgrade` with it: both read the port from the job. A session still has to be pointed at the new port (`aimux model proxy env --port`), and the proxy's request history and ledger are kept per port, so a new port starts new files.
 
 Making a job for a service that has none is not built yet: `--check` says so for that part and `--apply` leaves it as it is.
+
+## Models and roles
+
+A role says which model a kind of work uses. So that a new model is one changed line, a role never names a model: it names an entry under `models`.
+
+```bash
+aimux engine model update implement codex:gpt-6.2-sol   # name a model
+aimux engine role update subagent implement             # your own subagents that name no model use it
+aimux engine list                                       # what each role and each subagent runs on
+aimux engine role delete subagent                       # back to the session's model
+aimux engine model delete implement                     # refused while a role still uses it
+```
+
+`aimux engine list` then shows, under the engines:
+
+```text
+ROLE      MODEL                          ENGINE
+main      (the session's)                -
+subagent  implement = codex:gpt-6.2-sol  codex
+
+SUBAGENT       DEFINED IN        ITS MODEL            RUNS ON
+reviewer       ~/.claude/agents  codex:gpt-6.2-astra  codex
+helper         ~/.claude/agents  (none: the role's)   codex
+```
+
+The second table is your own subagent definitions, from `~/.claude/agents` and the project's `.claude/agents`. One that names a model in its definition (`model:` in its front matter) keeps it: Claude Code lets that win over any default, so that is where a kind of subagent that should differ says so. aimux reads those files and never edits them. Built-in subagents and those a plugin brings are not listed; the built-in Explore uses the session's model whatever the role says.
+
+There is one role, `subagent`. The main conversation's model is chosen in the session, with `/model`. These commands change the file only: no service runs differently for a role.
+
+A role reaches a session through its shell. `aimux model proxy env` reads the role from the file and sets `CLAUDE_CODE_SUBAGENT_MODEL`, the variable Claude Code reads when it starts for the model its subagents use by default. So:
+
+- It holds for sessions started from a shell set after the change. A session that is already running keeps what it started with; exit and resume it to pick up a new role.
+- `AIMUX_ROLES=off` in a shell's environment leaves the role out for that shell.
+- A value of your own in that variable is left alone, and `aimux model proxy env` says so.
+- A role whose engine the running proxy does not answer with is not set, and it says which engine.
+- `aimux model proxy env --off` takes the variable back, and only when aimux set it.
 
 ## Switch engine inside a session
 

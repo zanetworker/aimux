@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +18,7 @@ import (
 
 	"github.com/zanetworker/aimux/internal/keyring"
 	"github.com/zanetworker/aimux/internal/modelproxy"
+	"github.com/zanetworker/aimux/internal/parts"
 )
 
 func newModelProxyEnvCmd() *cobra.Command {
@@ -64,6 +67,13 @@ func newModelProxyEnvCmd() *cobra.Command {
 				}
 				return fmt.Errorf(`this prints the proxy key, so it is not shown on a terminal; run it as: lines="$(%s)" && eval "$lines"`, again)
 			}
+			// The subagent role from the config file, when the file reads without a problem. A file that does not
+			// is not a reason to leave the shell unset: the role is then simply not carried.
+			if home, err := os.UserHomeDir(); err == nil && !o.off && !o.codex {
+				if s, err := parts.Load(filepath.Join(home, ".aimux", "config.yaml")); err == nil && len(s.Validate()) == 0 {
+					o.subagentModel, _ = s.Parts["inference-proxy"].RoleModel(parts.RoleSubagent)
+				}
+			}
 			return modelProxyEnv(cmd.Context(), o, keyring.Stored(modelproxy.KeyService).Lookup, os.Getenv, cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 	}
@@ -79,6 +89,8 @@ type envOpts struct {
 	off   bool
 	codex bool   // Codex alone, with the model pinned
 	model string // the Codex model; the default when empty
+	// subagentModel is the model the config file's subagent role stands for; empty when it sets none.
+	subagentModel string
 }
 
 // modelProxyEnv writes the lines to stdout and one sentence about them to stderr. Nothing reaches stdout unless
@@ -99,7 +111,8 @@ func modelProxyEnv(ctx context.Context, o envOpts, key func(context.Context) (st
 			}
 			held = getenv("ANTHROPIC_API_KEY") == secret
 		}
-		_, err := fmt.Fprintln(stdout, strings.Join(modelproxy.SessionEnvOff(marker, held, modelproxy.PickerIsOurs(getenv(modelproxy.PickerVar), getenv(modelproxy.PickerMarker))), "\n"))
+		_, err := fmt.Fprintln(stdout, strings.Join(modelproxy.SessionEnvOff(marker, held, modelproxy.PickerIsOurs(getenv(modelproxy.PickerVar), getenv(modelproxy.PickerMarker)),
+			modelproxy.PickerIsOurs(getenv(modelproxy.SubagentModelVar), getenv(modelproxy.RolesMarker)), getenv(modelproxy.RolesMarker) != ""), "\n"))
 		return err
 	}
 	// With one of these set, Claude Code talks to that provider and never reads the base URL.
@@ -160,10 +173,30 @@ func modelProxyEnv(ctx context.Context, o envOpts, key func(context.Context) (st
 	} else {
 		how = "this shell already has a picker entry of its own, so switch by name: /model codex:" + modelproxy.DefaultCodexModel
 	}
+	// The subagent role, where it would work: an engine this proxy answers with, and no default of the owner's
+	// own already in the shell.
+	roles := ""
+	if o.subagentModel != "" {
+		engine, own := parts.ModelEngine(o.subagentModel), getenv(modelproxy.SubagentModelVar)
+		roleLines, valid := modelproxy.SessionEnvRoles(o.subagentModel)
+		switch {
+		case getenv("AIMUX_ROLES") == "off":
+			roles = " The subagent role is not set: AIMUX_ROLES=off in this shell."
+		case !valid:
+			roles = " The subagent role is not set: what the config file names for it is not a model."
+		case own != "" && !modelproxy.PickerIsOurs(own, getenv(modelproxy.RolesMarker)):
+			roles = " The subagent role is not set: this shell already has " + modelproxy.SubagentModelVar + " of its own."
+		case live.Engines != nil && !slices.Contains(live.Engines, engine):
+			roles = " The subagent role is not set: this proxy does not answer with the " + engine + " engine its model is on."
+		default:
+			lines = append(lines, roleLines...)
+			roles = " Your own subagents that name no model use the one the subagent role names."
+		}
+	}
 	if _, err := fmt.Fprintln(stdout, strings.Join(lines, " &&\n")); err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintf(stderr, "Claude Code sessions started from this shell now go through the model proxy on port %d: "+
-		"Claude models on your Claude login, codex: models on Codex (%s). Undo with: eval \"$(aimux model proxy env --off)\"\n", port, how)
+		"Claude models on your Claude login, codex: models on Codex (%s).%s Undo with: eval \"$(aimux model proxy env --off)\"\n", port, how, roles)
 	return nil
 }

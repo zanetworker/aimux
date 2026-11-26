@@ -250,3 +250,72 @@ func TestPartSwitch_DoesNotClaimWhatItDidNotDo(t *testing.T) {
 		t.Errorf("the file was not changed:\n%s", data)
 	}
 }
+
+// A model is named, a role given it, and the list shows both with what each of the owner's subagents runs on.
+func TestEngineModelAndRoleCommands(t *testing.T) {
+	home := t.TempDir()
+	agents := filepath.Join(home, ".claude", "agents")
+	if err := os.MkdirAll(agents, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, text := range map[string]string{
+		"reviewer.md": "---\nname: reviewer\nmodel: codex:gpt-6.2-astra\n---\nReview.\n",
+		"helper.md":   "---\nname: helper\n---\nHelp.\n",
+	} {
+		if err := os.WriteFile(filepath.Join(agents, name), []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, args := range [][]string{
+		{"model", "update", "implement", "codex:gpt-6.2-sol"},
+		{"role", "update", "subagent", "implement"},
+	} {
+		if out, err := engineIn(t, home, args...); err != nil || !strings.Contains(out, "Changed ") {
+			t.Fatalf("%v: %v\n%s", args, err, out)
+		}
+	}
+	out, err := engineIn(t, home, "list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"ROLE", "main", "(the session's)", "subagent", "implement = codex:gpt-6.2-sol",
+		"SUBAGENT", "reviewer", "codex:gpt-6.2-astra", "helper", "(none: the role's)", "~/.claude/agents"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("no %q in:\n%s", want, out)
+		}
+	}
+	// A role that cannot be set is refused, and the file says why not.
+	if _, err := engineIn(t, home, "role", "update", "main", "implement"); err == nil || !strings.Contains(err.Error(), "chosen in the session") {
+		t.Errorf("role update main: %v", err)
+	}
+	// An entry a role still uses stays; then the role goes, then the entry.
+	if _, err := engineIn(t, home, "model", "delete", "implement"); err == nil || !strings.Contains(err.Error(), "subagent") {
+		t.Errorf("model delete while in use: %v", err)
+	}
+	for _, args := range [][]string{{"role", "delete", "subagent"}, {"model", "delete", "implement"}} {
+		if _, err := engineIn(t, home, args...); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+	}
+	s, _ := parts.Load(filepath.Join(home, ".aimux", "config.yaml"))
+	if p := s.Parts["inference-proxy"]; len(p.Roles) != 0 || len(p.Models) != 0 || len(s.Validate()) != 0 {
+		t.Errorf("after deleting: %+v %v", p, s.Validate())
+	}
+	// In JSON the same rows.
+	jsonOutput = true
+	defer func() { jsonOutput = false }()
+	_, _ = engineIn(t, home, "model", "update", "implement", "codex:gpt-6.2-sol")
+	_, _ = engineIn(t, home, "role", "update", "subagent", "implement")
+	jout, err := engineIn(t, home, "list")
+	var doc struct {
+		Roles     []struct{ Role, Entry, Model, Engine string }
+		Subagents []struct {
+			Name, Model string
+			RunsOn      string `json:"runs_on"`
+			FromRole    bool   `json:"from_role"`
+		}
+	}
+	if err != nil || json.Unmarshal([]byte(jout), &doc) != nil || len(doc.Roles) != 2 || doc.Roles[1].Engine != "codex" || len(doc.Subagents) != 2 {
+		t.Fatalf("%v\n%s", err, jout)
+	}
+}

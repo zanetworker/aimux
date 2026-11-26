@@ -208,8 +208,56 @@ func newEngineCmdWith(env frontEnv) *cobra.Command {
 		edit("remove <name>", "Forget an engine that was added", cobra.ExactArgs(1),
 			func(file string, a []string) error { return parts.RemoveEngine(file, a[0]) }, nil),
 		newEngineListCmd(env),
+		newEngineNamesCmd(env, "model", "Name the models roles use: one place where a model name is written",
+			"A role names an entry here, never a model, so replacing a model is one change. A value is a model as a\n"+
+				"session names it (codex:gpt-6.2-sol, claude-opus-5-5, <engine>:<model>) or codex:default, which follows\n"+
+				"the proxy's current default Codex model.",
+			"update <entry> <model>", "Name a model, or give an entry another one",
+			func(file string, a []string) error { return parts.SetModel(file, a[0], a[1]) },
+			"delete <entry>", "Take an entry out; one a role still uses is refused",
+			func(file string, a []string) error { return parts.ClearModel(file, a[0]) }),
+		newEngineNamesCmd(env, "role", "Say which model a kind of work uses",
+			"The one role is subagent: your own subagents that name no model. The main conversation's model is\n"+
+				"chosen in the session, and a kind of subagent that should differ names its model in its own definition,\n"+
+				"which wins over the role. A role is given an entry of aimux engine model, not a model.",
+			"update <role> <entry>", "Give a role an entry of models",
+			func(file string, a []string) error { return parts.SetRole(file, a[0], a[1]) },
+			"delete <role>", "Take a role out, so that work uses the session's model again",
+			func(file string, a []string) error { return parts.ClearRole(file, a[0]) }),
 	)
 	return engine
+}
+
+// newEngineNamesCmd is the pair of commands that change one entry of models or of roles. They change the file
+// and nothing else: no service runs differently for a role, which reaches a session through its shell.
+func newEngineNamesCmd(env frontEnv, use, short, long, updateUse, updateShort string, update func(string, []string) error, deleteUse, deleteShort string, remove func(string, []string) error) *cobra.Command {
+	cmd := &cobra.Command{Use: use, Short: short, Long: long}
+	one := func(use, short string, n int, change func(string, []string) error) *cobra.Command {
+		return &cobra.Command{Use: use, Short: short, Args: cobra.ExactArgs(n), RunE: func(c *cobra.Command, a []string) error {
+			c.SilenceUsage = true
+			if env.Home == "" {
+				return errors.New("the home folder is not known, so the config file cannot be found; set HOME")
+			}
+			file := filepath.Join(env.Home, ".aimux", "config.yaml")
+			before, _ := os.ReadFile(file) // #nosec G304 -- the owner's own config file
+			if err := change(file, a); err != nil {
+				return err
+			}
+			after, _ := os.ReadFile(file) // #nosec G304 -- the owner's own config file
+			changed := !bytes.Equal(before, after)
+			if jsonOutput {
+				return writeJSON(c.OutOrStdout(), map[string]any{"schema_version": 1, "changed": changed})
+			}
+			said := "Changed " + file + "."
+			if !changed {
+				said = file + " already says that."
+			}
+			_, _ = fmt.Fprintf(c.OutOrStdout(), "%s\nTo see what each role and subagent runs on: aimux engine list\n", said)
+			return nil
+		}}
+	}
+	cmd.AddCommand(one(updateUse, updateShort, 2, update), one(deleteUse, deleteShort, 1, remove))
+	return cmd
 }
 
 // engineRow is one engine as `aimux engine list` shows it.
@@ -251,7 +299,15 @@ func newEngineListCmd(env frontEnv) *cobra.Command {
 			default:
 				answer = proxySays
 			}
-			return writeEngines(c.OutOrStdout(), engineRows(views, stated, live.Engines, answer), port, answer, jsonOutput)
+			// Roles, and what each of the owner's subagent definitions runs on, from the same file.
+			settings, _ := parts.Load(filepath.Join(env.Home, ".aimux", "config.yaml"))
+			proxy := settings.Parts["inference-proxy"]
+			dirs := []controller.SubagentDir{{Path: filepath.Join(env.Home, ".claude", "agents"), Label: "~/.claude/agents"}}
+			if cwd, err := os.Getwd(); err == nil && filepath.Join(cwd, ".claude", "agents") != dirs[0].Path {
+				dirs = append(dirs, controller.SubagentDir{Path: filepath.Join(cwd, ".claude", "agents"), Label: ".claude/agents"})
+			}
+			more := engineRoles{Roles: controller.RolesView(proxy, live.Engines), Subagents: controller.SubagentModels(dirs, proxy)}
+			return writeEngines(c.OutOrStdout(), engineRows(views, stated, live.Engines, answer), port, answer, jsonOutput, more)
 		},
 	}
 }
@@ -298,10 +354,28 @@ func engineRows(views []parts.EngineView, stated bool, running []string, answer 
 	return rows
 }
 
-func writeEngines(out io.Writer, rows []engineRow, port, answer int, asJSON bool) error {
-	if asJSON {
-		return writeJSON(out, map[string]any{"schema_version": 1, "port": port, "engines": rows})
+// engineRoles is what the list shows beside the engines: the roles, and the owner's subagent definitions.
+type engineRoles struct {
+	Roles     []controller.RoleRow
+	Subagents []controller.SubagentRow
+}
+
+func writeEngines(out io.Writer, rows []engineRow, port, answer int, asJSON bool, more ...engineRoles) error {
+	var roles engineRoles
+	if len(more) > 0 {
+		roles = more[0]
 	}
+	if asJSON {
+		doc := map[string]any{"schema_version": 1, "port": port, "engines": rows}
+		if len(more) > 0 {
+			doc["roles"], doc["subagents"] = roles.Roles, roles.Subagents
+			if roles.Subagents == nil {
+				doc["subagents"] = []controller.SubagentRow{}
+			}
+		}
+		return writeJSON(out, doc)
+	}
+	defer writeRoles(out, roles)
 	table := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(table, "ENGINE\tIN THE FILE\tRUNNING\tTYPE\tWHERE\tKEY")
 	differs, unstated := false, false
@@ -377,4 +451,47 @@ func newPartSwitchCmd(env frontEnv, on bool) *cobra.Command {
 	}
 	addApplyFlags(cmd, &noApply, &yes)
 	return cmd
+}
+
+// writeRoles prints the roles and the subagent definitions under the engines. With no role set and no definition
+// found there is nothing to say, and nothing is printed.
+func writeRoles(out io.Writer, r engineRoles) {
+	if len(r.Roles) > 1 {
+		table := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+		_, _ = fmt.Fprintln(table, "\nROLE\tMODEL\tENGINE")
+		for _, row := range r.Roles {
+			model, engine := "(the session's)", "-"
+			if row.Entry != "" {
+				model, engine = printable(row.Entry)+" = "+printable(row.Model), row.Engine
+			}
+			_, _ = fmt.Fprintf(table, "%s\t%s\t%s\n", row.Role, model, engine)
+		}
+		_ = table.Flush()
+		for _, row := range r.Roles {
+			if row.Note != "" {
+				_, _ = fmt.Fprintf(out, "%s: %s\n", row.Role, row.Note)
+			}
+		}
+	}
+	if len(r.Subagents) == 0 {
+		return
+	}
+	table := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintln(table, "\nSUBAGENT\tDEFINED IN\tITS MODEL\tRUNS ON")
+	for _, row := range r.Subagents {
+		model, on := printable(row.Model), row.RunsOn
+		switch {
+		case row.FromRole:
+			model = "(none: the role's)"
+		case row.Model == "":
+			model = "(none)"
+		}
+		if on == "" {
+			on = "the session's model"
+		}
+		_, _ = fmt.Fprintf(table, "%s\t%s\t%s\t%s\n", printable(row.Name), row.DefinedIn, model, on)
+	}
+	_ = table.Flush()
+	_, _ = fmt.Fprintln(out, "RUNS ON holds for a session started from a shell set by aimux model proxy env; one already running keeps what it started with.")
+	_, _ = fmt.Fprintln(out, "Built-in subagents (Explore and the like) and those a plugin brings are not listed; Explore uses the session's model whatever the role says.")
 }

@@ -332,3 +332,57 @@ func TestProxyEnv_ThePickerEntry(t *testing.T) {
 		}
 	}
 }
+
+// The subagent role reaches a session through its shell: Claude Code's own variable for the model subagents use
+// by default. aimux sets it only where it would work, leaves one of the owner's alone, and takes its own back.
+func TestProxyEnv_TheSubagentRole(t *testing.T) {
+	port := proxyAnswering(t, "codex", "anthropic")
+	run := func(o envOpts, shell map[string]string) (string, string) {
+		t.Helper()
+		var stdout, stderr bytes.Buffer
+		o.port = port
+		if err := modelProxyEnv(context.Background(), o, testKey, func(k string) string { return shell[k] }, &stdout, &stderr); err != nil {
+			t.Fatal(err)
+		}
+		return stdout.String(), stderr.String()
+	}
+	out, said := run(envOpts{subagentModel: "codex:gpt-6.2-sol"}, nil)
+	if !strings.Contains(out, "export CLAUDE_CODE_SUBAGENT_MODEL='codex:gpt-6.2-sol'") || !strings.Contains(out, "export AIMUX_MODEL_PROXY_ROLES='codex:gpt-6.2-sol'") || !strings.Contains(said, "subagents") {
+		t.Fatalf("stdout:\n%s\nstderr:\n%s", out, said)
+	}
+	// codex:default is the proxy's default Codex model at the time.
+	if out, _ := run(envOpts{subagentModel: "codex:default"}, nil); !strings.Contains(out, "CLAUDE_CODE_SUBAGENT_MODEL='codex:"+modelproxy.DefaultCodexModel+"'") {
+		t.Errorf("codex:default:\n%s", out)
+	}
+	for name, tc := range map[string]struct {
+		model string
+		shell map[string]string
+		says  string
+	}{
+		"switched off for this shell":        {"codex:gpt-6.2-sol", map[string]string{"AIMUX_ROLES": "off"}, "AIMUX_ROLES=off"},
+		"a default of the owner's own":       {"codex:gpt-6.2-sol", map[string]string{"CLAUDE_CODE_SUBAGENT_MODEL": "haiku"}, "already"},
+		"an engine this proxy does not have": {"lab:deepseek-v4", nil, "lab"},
+		"a model that is not a name":         {"codex:x'; rm -rf ~; '", nil, "not a model"},
+	} {
+		out, said := run(envOpts{subagentModel: tc.model}, tc.shell)
+		if strings.Contains(out, "CLAUDE_CODE_SUBAGENT_MODEL") || !strings.Contains(said, tc.says) {
+			t.Errorf("%s:\nstdout:\n%s\nstderr:\n%s", name, out, said)
+		}
+	}
+	// One aimux set earlier is replaced, and --off takes it back; the owner's own stays.
+	ours := map[string]string{"CLAUDE_CODE_SUBAGENT_MODEL": "codex:gpt-6.2-sol", "AIMUX_MODEL_PROXY_ROLES": "codex:gpt-6.2-sol", "AIMUX_MODEL_PROXY_ENV": "engines"}
+	if out, _ := run(envOpts{subagentModel: "codex:gpt-6.2-astra"}, ours); !strings.Contains(out, "CLAUDE_CODE_SUBAGENT_MODEL='codex:gpt-6.2-astra'") {
+		t.Errorf("replacing aimux's own:\n%s", out)
+	}
+	noKey := func(context.Context) (string, error) { return "", errors.New("must not be asked") }
+	for value, gone := range map[string]bool{"codex:gpt-6.2-sol": true, "haiku": false} {
+		shell := map[string]string{"CLAUDE_CODE_SUBAGENT_MODEL": value, "AIMUX_MODEL_PROXY_ROLES": "codex:gpt-6.2-sol", "AIMUX_MODEL_PROXY_ENV": "engines"}
+		var off, stderr bytes.Buffer
+		if err := modelProxyEnv(context.Background(), envOpts{port: 1, off: true}, noKey, func(k string) string { return shell[k] }, &off, &stderr); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(off.String(), " CLAUDE_CODE_SUBAGENT_MODEL") != gone || !strings.Contains(off.String(), "AIMUX_MODEL_PROXY_ROLES") {
+			t.Errorf("%s: --off printed %q", value, off.String())
+		}
+	}
+}

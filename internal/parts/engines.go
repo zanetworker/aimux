@@ -279,3 +279,12 @@ func ClearRole(file, role string) error {
 		return []step{{rolePath(role), nil}}, nil
 	})
 }
+
+// ModelEngine is the engine that answers a model named as a session names it: the one in front of the first
+// colon, or Anthropic for a name with none. A Claude alias (opus, sonnet, haiku) is Anthropic's too.
+func ModelEngine(model string) string {
+	if prefix, _, ok := strings.Cut(model, ":"); ok && engineName.MatchString(prefix) {
+		return prefix
+	}
+	return EngineAnthropic
+}
