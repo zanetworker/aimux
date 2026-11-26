@@ -36,6 +36,11 @@ func modelProxyStatus(ctx context.Context, addr, key string, out io.Writer, now 
 }
 
 func readProxyHealth(ctx context.Context, addr, key string) (modelproxy.Health, error) {
+	return readProxyHealthOver(ctx, nil, addr, key)
+}
+
+// readProxyHealthOver is readProxyHealth over transport (nil: the default one).
+func readProxyHealthOver(ctx context.Context, transport http.RoundTripper, addr, key string) (modelproxy.Health, error) {
 	var health modelproxy.Health
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+addr+"/health", nil)
 	if err != nil {
@@ -45,6 +50,7 @@ func readProxyHealth(ctx context.Context, addr, key string) (modelproxy.Health, 
 	// Never follow a redirect: Go would resend the proxy key, and a redirect from this port means something
 	// other than the proxy is listening on it.
 	client := &http.Client{
+		Transport:     transport,
 		Timeout:       10 * time.Second,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}

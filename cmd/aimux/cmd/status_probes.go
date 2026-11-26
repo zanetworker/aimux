@@ -140,6 +140,12 @@ func readModelLiveness(ctx context.Context, addr string) (modelproxy.Liveness, e
 // challengeModelLiveness reads the keyless health answer, asking the proxy to prove with nonce that it holds the
 // key (modelproxy.CheckSessionProxy checks the proof). An empty nonce asks for no proof.
 func challengeModelLiveness(ctx context.Context, addr, nonce string) (modelproxy.Liveness, error) {
+	return challengeModelLivenessOver(ctx, nil, addr, nonce)
+}
+
+// challengeModelLivenessOver is challengeModelLiveness over transport (nil: the default one). The answer is read
+// to its end, so a transport that keeps its connection can use the same one for what follows.
+func challengeModelLivenessOver(ctx context.Context, transport http.RoundTripper, addr, nonce string) (modelproxy.Liveness, error) {
 	var live modelproxy.Liveness
 	target := "http://" + addr + "/healthz"
 	if nonce != "" {
@@ -149,12 +155,15 @@ func challengeModelLiveness(ctx context.Context, addr, nonce string) (modelproxy
 	if err != nil {
 		return live, err
 	}
-	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	resp, err := client.Do(req)
 	if err != nil {
 		return live, err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+		_ = resp.Body.Close()
+	}()
 	switch resp.StatusCode {
 	case http.StatusOK:
 		err = json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&live)

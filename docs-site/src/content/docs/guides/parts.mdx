@@ -158,3 +158,42 @@ another gateway
 With `--json` it prints `{"schema_version": 1, "through_proxy", "port", "mode", "engine", "model", "proxy": {"state", "build", "engines", "engine_on"}}`. `mode` is `direct`, `engines` or `codex` (the two forms `env` sets), `unmarked` (a proxy on this machine, set by hand) or `elsewhere` (another gateway). `proxy.state` is `ok`, `degraded`, `down` (nothing answers on the port) or `not aimux` (something else answers there); `proxy` is left out when the sessions do not go through a proxy.
 
 It exits 1 when the sessions go through a proxy that does not answer, or whose engine for that model is off, so a status line can turn red on the exit code alone.
+
+## When the proxy misbehaves
+
+One command checks the things that break in practice and names the fix for each:
+
+```bash
+aimux model proxy doctor            # the everyday proxy
+aimux model proxy doctor --port 7386
+```
+
+```text
+Model proxy on 127.0.0.1:7385. 1 thing to look at; nothing is failing.
+
+CHECK    STATE  DETAIL
+service  ok     answers on 127.0.0.1:7385
+build    warn   its build 283 is older than the CLI (289), so it lacks what was fixed since
+key      ok     the proxy holds the stored key
+codex    ok     the Codex login works, checked 1m ago
+ledger   ok     every call is recorded
+engines  ok     answers with codex
+calls    ok     30 calls in the last hour, none failed
+shell    ok     sessions started from this shell do not go through the proxy, so it does not see them
+
+FIX
+  build: aimux upgrade model-proxy
+```
+
+| Check | What it looks at | When it is not ok |
+|---|---|---|
+| `service` | Whether something answers on the port, and whether it is the model proxy | `fail`: nothing answers, or something else listens there. `warn`: the proxy says it is degraded, with its reason |
+| `build` | The proxy's build against this aimux | `warn`: it is older; `aimux upgrade model-proxy` |
+| `key` | Whether a proxy key is stored, and whether the listener proved it holds the same one | `fail`: no key yet, or a listener that does not hold it |
+| `codex` | The proxy's own check of the Codex login, which costs no tokens | `fail`: the last check failed, with its words. `warn`: the last good one is more than 15 minutes old |
+| `ledger` | Whether calls are being recorded | `fail`: the ledger could not be opened. `warn`: some lines were lost |
+| `engines` | The engines it answers with against the ones the config file states | `warn`: they differ; `aimux setup --apply` |
+| `calls` | The last hour of requests, from the proxy's request history | `warn`: a rate limit (the plan's, not the proxy's) or an upstream's own failure. `fail`: a refused login, or calls that failed before any answer |
+| `shell` | Whether the shell you ran it in points at this proxy, and at an engine it has | `fail`: the engine is off; `aimux engine enable <name>` |
+
+The `FIX` section lists a command only for the checks that have one; a rate limit, for instance, has none, and in `--json` such a finding has no `fix`. It reads only: nothing is started, restarted or changed, and no tokens are spent. The proxy key is sent only to a listener that first proved it holds the same key, and only down the connection that proof came back on. When nothing answers, the checks that need an answer are left out instead of guessed. It exits 1 when something is failing; a warning alone exits 0. With `--json` it prints `{"schema_version": 1, "port", "verdict", "findings": [{"id", "level", "detail", "fix"}]}`, `verdict` being the worst level.
