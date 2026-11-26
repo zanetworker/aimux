@@ -88,6 +88,20 @@ The two credentials are different things. The proxy key says a caller may use wh
 
 A session that uses both engines has to present both, and `Authorization` is taken by the login. So the proxy key can also travel as the first part of the path: a base URL of `http://127.0.0.1:7385/k/<key>` puts it on every request. This way of presenting the key works whether or not `--anthropic` is given. The proxy removes that part before anything else reads the path. A wrong key there is refused even when a login is present, and so is the prefix spelled with percent escapes. A request whose address holds the key anywhere else is not sent to Anthropic.
 
+### What it says when it starts
+
+A starting proxy lists the engines it answers with, so you can see that a flag took effect:
+
+```text
+Model proxy at http://127.0.0.1:7386
+Engines
+  codex      on   the Codex program on this machine, on your ChatGPT plan; its start is reported below
+  anthropic  on   Claude models go to https://api.anthropic.com on the caller's own Claude login; nothing to start
+model proxy: Codex started in 1943ms
+```
+
+Codex is a program the proxy launches, so it reports its own start a moment later. Anthropic and a named upstream are addresses that requests are passed on to: there is nothing to start, and no connection is made until a session sends a request. Without `--anthropic` the line reads `anthropic  off`, with how to turn it on; each named upstream gets a line of its own.
+
 ### Point a shell at the proxy
 
 ```bash

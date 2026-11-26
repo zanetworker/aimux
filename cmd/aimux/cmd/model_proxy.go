@@ -36,6 +36,29 @@ type messagesUpstream struct {
 	ref           *secretref.Ref // nil: the secret-store entry <name>-key
 }
 
+// serveEngineLines is what a starting proxy says of its engines: each one it answers with and how, and Anthropic
+// as off when it is. Codex is a program and reports its own start; the others pass requests on and have nothing
+// to start, so without these lines a flag that took effect looked the same as one that did not.
+func serveEngineLines(anthropic bool, upstreams []messagesUpstream) []string {
+	width := len("anthropic")
+	for _, u := range upstreams {
+		width = max(width, len(u.name))
+	}
+	row := func(name, state, what string) string {
+		return fmt.Sprintf("  %-*s  %-3s  %s", width, name, state, what)
+	}
+	lines := []string{"Engines", row("codex", "on", "the Codex program on this machine, on your ChatGPT plan; its start is reported below")}
+	if anthropic {
+		lines = append(lines, row("anthropic", "on", "Claude models go to "+modelproxy.AnthropicUpstream+" on the caller's own Claude login; nothing to start"))
+	} else {
+		lines = append(lines, row("anthropic", "off", "start with --anthropic, or for the everyday proxy: aimux engine enable anthropic"))
+	}
+	for _, u := range upstreams {
+		lines = append(lines, row(u.name, "on", u.name+":<model> goes to "+u.address+" with the key kept for it"))
+	}
+	return lines
+}
+
 // parseMessagesUpstreams reads the two repeated flags. A name given twice, a key for a name that is not an
 // upstream, and a reference that is not one are refused before anything starts.
 func parseMessagesUpstreams(pairs, keys []string) ([]messagesUpstream, error) {
@@ -279,7 +302,7 @@ func newModelProxyServeCmd() *cobra.Command {
 			}
 			stopServer := context.AfterFunc(ctx, func() { _ = server.Close() })
 			defer stopServer()
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Model proxy at http://%s\n", ln.Addr())
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Model proxy at http://%s\n%s\n", ln.Addr(), strings.Join(serveEngineLines(anthropic, upstreams), "\n"))
 			if err := server.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
 				return err
 			}
