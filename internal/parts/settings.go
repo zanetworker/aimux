@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/url"
 	"os"
@@ -54,6 +55,32 @@ type PartSettings struct {
 	Port    int
 	Serves  []string
 	Engines map[string]Engine
+	// Models gives names to models, so a role names an entry and a new model is one changed line. A value is a
+	// model as the harness names it (codex:gpt-6.2-sol, claude-opus-5-5, <engine>:<model>) or codex:default.
+	Models map[string]string
+	// Roles says which entry of Models a kind of work uses. The one role is RoleSubagent.
+	Roles map[string]string
+	// OnLimit is what the proxy does when a plan limit comes back: empty, or OnLimitReport.
+	OnLimit string
+}
+
+// The one role a setting can be given, and what on_limit can say in this build.
+const (
+	RoleSubagent  = "subagent" // the owner's own subagents that name no model
+	OnLimitReport = "report"   // write what a fallback would have done; change nothing
+	// CodexDefault names whatever the proxy's default Codex model is at the time.
+	CodexDefault = "codex:default"
+)
+
+// RoleModel is the model a role stands for, through its entry in Models. ok is false for a role the file does
+// not set.
+func (p PartSettings) RoleModel(role string) (model string, ok bool) {
+	entry, set := p.Roles[role]
+	if !set {
+		return "", false
+	}
+	model, ok = p.Models[entry]
+	return model, ok
 }
 
 // Engine is one engine as the file states it.
@@ -279,6 +306,7 @@ func (s *Settings) part(id string, key, node *yaml.Node) PartSettings {
 		return out
 	}
 	s.twice(path, node)
+	var modelNodes, roleNodes map[string]*yaml.Node
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		name, value := node.Content[i].Value, node.Content[i+1]
 		field := path + "." + name
@@ -302,12 +330,25 @@ func (s *Settings) part(id string, key, node *yaml.Node) PartSettings {
 			}
 		case name == "engines" && proxyOnly:
 			out.Engines = s.engines(field, value)
-		case name == "port" || name == "serves" || name == "engines":
+		case name == "models" && proxyOnly:
+			out.Models, modelNodes = s.names(field, value, "models gives names to models, for example implement: codex:gpt-6.2-sol")
+		case name == "roles" && proxyOnly:
+			out.Roles, roleNodes = s.names(field, value, "roles says which entry of models a kind of work uses, for example subagent: implement")
+		case name == "on_limit" && proxyOnly:
+			if value.Kind != yaml.ScalarNode || value.Value != OnLimitReport {
+				s.problem(field, value, "on_limit takes %s in this build: it writes what a fallback would have done and changes nothing. Continuing on another engine comes later", OnLimitReport)
+			} else {
+				out.OnLimit = OnLimitReport
+			}
+		case name == "port" || name == "serves" || name == "engines" || name == "models" || name == "roles" || name == "on_limit":
 			s.problem(field, node.Content[i], "%s is not a setting of this part", name)
 		default:
 			s.problem(field, node.Content[i], "%q is not a setting of a part", plain(name))
 		}
 	}
+	// Models and roles are checked once everything is read: an entry is judged against the engines the file
+	// states, wherever in the part they are written.
+	s.modelsAndRoles(path, &out, modelNodes, roleNodes)
 	switch {
 	case out.Enabled == nil:
 		s.problem(path+".enabled", key, "a part that is listed says enabled: true or enabled: false; to leave it as it is, take it out of the file")
@@ -315,6 +356,84 @@ func (s *Settings) part(id string, key, node *yaml.Node) PartSettings {
 		s.problem(path, key, "%s is not available yet", known.Name)
 	}
 	return out
+}
+
+// names reads a mapping of one word to one word, keeping each key's node so a problem can name its line.
+func (s *Settings) names(path string, node *yaml.Node, shape string) (map[string]string, map[string]*yaml.Node) {
+	// A key left with nothing under it, as after its last entry was taken out, states nothing.
+	if node.Tag == "!!null" {
+		return nil, nil
+	}
+	if node.Kind != yaml.MappingNode {
+		s.problem(path, node, "%s", shape)
+		return nil, nil
+	}
+	s.twice(path, node)
+	values, nodes := map[string]string{}, map[string]*yaml.Node{}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key, value := node.Content[i], node.Content[i+1]
+		// One word for one word: a number or true would be read as something other than a name.
+		if value.Kind != yaml.ScalarNode || value.Tag != "!!str" {
+			s.problem(path+"."+key.Value, value, "%s", shape)
+			continue
+		}
+		values[key.Value], nodes[key.Value] = value.Value, key
+	}
+	return values, nodes
+}
+
+// modelName is a model as a provider names it. A colon may be part of one (a version, after the engine's own).
+var modelName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/@:\[\]-]{0,127}$`)
+
+// modelsAndRoles checks the entries of models and the roles that name them.
+func (s *Settings) modelsAndRoles(path string, out *PartSettings, modelNodes, roleNodes map[string]*yaml.Node) {
+	for _, name := range slices.Sorted(maps.Keys(out.Models)) {
+		field, at, model := path+".models."+name, modelNodes[name], out.Models[name]
+		if !engineName.MatchString(name) {
+			s.problem(field, at, "an entry is named in lower-case letters, digits and hyphens, starting with a letter")
+			delete(out.Models, name)
+			continue
+		}
+		engine, bare, prefixed := EngineAnthropic, model, false
+		if prefix, rest, ok := strings.Cut(model, ":"); ok {
+			engine, bare, prefixed = prefix, rest, true
+		}
+		switch {
+		case model == CodexDefault:
+		case prefixed && engine == EngineAnthropic:
+			s.problem(field, at, "a Claude model is named without an engine in front, as a session names it: claude-opus-5-5")
+			delete(out.Models, name)
+		case !modelName.MatchString(bare) || !engineName.MatchString(engine):
+			s.problem(field, at, "an entry holds one model as a session would name it, for example codex:gpt-6.2-sol or claude-opus-5-5")
+			delete(out.Models, name)
+		case engine == EngineCodex:
+		case !out.Engine(engine).On && engine == EngineAnthropic:
+			s.problem(field, at, "a model with no engine named is Anthropic's, and the anthropic engine is not on in this file; turn it on under engines, or name the engine: codex:<model>")
+		case !out.Engine(engine).On:
+			s.problem(field, at, "this model is on the engine %s, which is not on in this file", engine)
+		}
+	}
+	for _, role := range slices.Sorted(maps.Keys(out.Roles)) {
+		field, at, entry := path+".roles."+role, roleNodes[role], out.Roles[role]
+		_, known := out.Models[entry]
+		switch {
+		case role == "main":
+			s.problem(field, at, "the main conversation's model is chosen in the session (/model), not here")
+			delete(out.Roles, role)
+		case strings.HasPrefix(role, RoleSubagent+"."):
+			s.problem(field, at, "a kind of subagent names its model in its own definition (model: in its file); here there is the one role, %s, for those that name none", RoleSubagent)
+			delete(out.Roles, role)
+		case role != RoleSubagent:
+			s.problem(field, at, "the one role that can be set is %s", RoleSubagent)
+			delete(out.Roles, role)
+		case strings.Contains(entry, ":") || (!known && modelName.MatchString(entry) && strings.ContainsAny(entry, ".0123456789")):
+			s.problem(field, at, "a role names an entry, not a model: put the model under models with a name, and write that name here")
+			delete(out.Roles, role)
+		case !known:
+			s.problem(field, at, "models has no entry called %s", plain(entry))
+			delete(out.Roles, role)
+		}
+	}
 }
 
 func (s *Settings) boolean(path string, node *yaml.Node) *bool {

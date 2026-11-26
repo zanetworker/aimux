@@ -3,6 +3,7 @@ package parts
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 )
@@ -222,4 +223,59 @@ func ListEngines(file string) (views []EngineView, stated bool, err error) {
 		views = append(views, proxy.Engine(name))
 	}
 	return views, proxy.Engines != nil, nil
+}
+
+func modelPath(entry string) []string { return []string{"parts", proxyPart, "models", entry} }
+func rolePath(role string) []string   { return []string{"parts", proxyPart, "roles", role} }
+
+// SetModel names a model: the entry is added to models, or given another model when it is there already. A role
+// that names the entry follows it, which is how a new model is one changed line.
+func SetModel(file, entry, model string) error {
+	if !engineName.MatchString(entry) || scalar(entry) != entry {
+		return errors.New("an entry is named in lower-case letters, digits and hyphens, starting with a letter")
+	}
+	return change(file, func(s Settings) ([]step, error) {
+		edits, err := proxyOn(s)
+		if err != nil {
+			return nil, err
+		}
+		return append(edits, step{modelPath(entry), model}), nil
+	})
+}
+
+// ClearModel takes an entry out of models. One that a role still names is refused, with the role.
+func ClearModel(file, entry string) error {
+	return change(file, func(s Settings) ([]step, error) {
+		proxy := s.Parts[proxyPart]
+		if _, listed := proxy.Models[entry]; !listed {
+			return nil, fmt.Errorf("models has no entry called %s", plain(entry))
+		}
+		for _, role := range slices.Sorted(maps.Keys(proxy.Roles)) {
+			if proxy.Roles[role] == entry {
+				return nil, fmt.Errorf("the role %s uses this entry; clear the role first, or give it another entry", role)
+			}
+		}
+		return []step{{modelPath(entry), nil}}, nil
+	})
+}
+
+// SetRole says which entry of models a role uses. The entry has to be there: a role never names a model itself.
+func SetRole(file, role, entry string) error {
+	return change(file, func(s Settings) ([]step, error) {
+		edits, err := proxyOn(s)
+		if err != nil {
+			return nil, err
+		}
+		return append(edits, step{rolePath(role), entry}), nil
+	})
+}
+
+// ClearRole takes a role out of the file, so that kind of work uses the session's model again.
+func ClearRole(file, role string) error {
+	return change(file, func(s Settings) ([]step, error) {
+		if _, set := s.Parts[proxyPart].Roles[role]; !set {
+			return nil, fmt.Errorf("the role %s is not set in the file", plain(role))
+		}
+		return []step{{rolePath(role), nil}}, nil
+	})
 }

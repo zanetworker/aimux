@@ -38,12 +38,17 @@ The inference proxy has two sides. `serves` is the front: the APIs a client may 
 | `port` | `inference-proxy` | The port on 127.0.0.1 | What the installed job has |
 | `serves` | `inference-proxy` | The APIs a client may speak; `messages` is the only one this build knows | `[messages]` |
 | `engines` | `inference-proxy` | The engines, by name | What the installed job has |
+| `models` | `inference-proxy` | Names for models, the one place a model name is written: `implement: codex:gpt-6.2-sol`. A value is a model as a session would name it, or `codex:default` for the proxy's current default Codex model. Its engine has to be on in this file | No entries |
+| `roles` | `inference-proxy` | Which entry of `models` a kind of work uses. The one role is `subagent`: your own subagents that name no model. A role names an entry, never a model, so a new model is one changed line. The main conversation is chosen in the session, and a kind of subagent that should differ names its model in its own definition | No role: every kind of work uses the session's model |
+| `on_limit` | `inference-proxy` | What the proxy does when a plan limit comes back. `report` is the one value in this build: it records what a fallback would have done and changes nothing | Nothing is recorded about it |
 | `type` | an engine | The protocol the proxy speaks to it: `codex-app-server` or `messages` | Implied for `codex` and `anthropic`; required for any other name |
 | `auth` | a `messages` engine | Whose credential is sent: `caller` (the session's own login), which only `anthropic` may use, or `key` (your key for that engine), which is the only one an engine you name may use | `caller` for `anthropic`, `key` for any other |
 | `url` | a `messages` engine | Where it is; `https` unless on this machine | Required for an engine you name. `anthropic` always goes to `https://api.anthropic.com` and cannot be given another |
 | `key` | a `messages` engine with `auth: key` | Where its key is kept: `{keychain: {item: ...}}`, `{env: {name: ...}}`, `{file: {path: ...}}` or `{cmd: {argv: [...]}}`. Never the key | `{keychain: {item: <name>-key}}` |
 | `enabled` | an engine | Requests naming it are answered | On, for an engine that is listed. `codex` cannot be turned off |
 | `service_tier`, `binary` | `codex` | The tier (`priority` or `standard`) and the Codex program to run | What the installed job has |
+
+`models`, `roles` and `on_limit` are read and checked by this build, and nothing acts on them yet: no subagent is moved to another model and no limit is reported until the proxy and `aimux model proxy env` use them, which comes next. Setting them now only records your choice.
 
 Three rules are worth knowing before you edit it:
 
