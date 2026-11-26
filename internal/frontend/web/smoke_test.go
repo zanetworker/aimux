@@ -100,6 +100,8 @@ func TestAPISmoke_AllEndpoints(t *testing.T) {
 		"/api/agents?sort=name",
 		"/api/agents?filter=claude",
 		"/api/costs",
+		"/api/meter",
+		"/api/meter?by=role&since=7d",
 		"/api/teams",
 		"/api/health/providers",
 		"/api/health/remote",

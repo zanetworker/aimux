@@ -58,30 +58,14 @@ func newCostCmd() *cobra.Command {
 
 // costOptions turns the flags into meter options. now is when "since" counts back from.
 func costOptions(since, by, session string, now time.Time) (controller.MeterOptions, error) {
-	opts := controller.MeterOptions{By: controller.MeterBy(by), Session: session}
-	switch opts.By {
-	case controller.MeterBySession, controller.MeterByModel, controller.MeterByDay, controller.MeterByRole:
-	default:
+	opts, err := controller.ParseMeterOptions(since, by, session, now)
+	switch {
+	case errors.Is(err, controller.ErrMeterBy):
 		return opts, fmt.Errorf("unknown --by %q: choose session, model, day or role", by)
-	}
-	if since == "all" {
-		return opts, nil
-	}
-	back, err := time.ParseDuration(since)
-	if days, ok := strings.CutSuffix(since, "d"); ok {
-		var n int
-		// Bounded so the multiplication cannot overflow a duration.
-		if n, err = strconv.Atoi(days); err == nil && n <= 36500 {
-			back = time.Duration(n) * 24 * time.Hour
-		} else if err == nil {
-			back = 0
-		}
-	}
-	if err != nil || back <= 0 {
+	case errors.Is(err, controller.ErrMeterSince):
 		return opts, fmt.Errorf("unknown --since %q: use a duration such as 90m, 24h or 7d, or all", since)
 	}
-	opts.Since = now.Add(-back)
-	return opts, nil
+	return opts, err
 }
 
 func writeCost(out io.Writer, report controller.MeterReport, by controller.MeterBy, since string, asJSON bool) error {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -73,6 +74,42 @@ type MeterReport struct {
 	// Files is how many ledger files were read. Zero means nothing has written a ledger here yet, which is not
 	// the same as a quiet day.
 	Files int `json:"files"`
+}
+
+// What ParseMeterOptions could not read. A frontend says it in its own words: a flag's name, a query's.
+var (
+	ErrMeterBy    = errors.New("unknown grouping")
+	ErrMeterSince = errors.New("unknown time span")
+)
+
+// ParseMeterOptions reads how far back and grouped by what, as an owner writes them: since is a duration such
+// as 90m or 24h, a number of days such as 7d, or "all"; by is session (also when empty), model, day or role.
+// Every frontend reads them here, so "7d" means the same in a flag and in a query.
+func ParseMeterOptions(since, by, session string, now time.Time) (MeterOptions, error) {
+	opts := MeterOptions{By: MeterBy(cmp.Or(by, string(MeterBySession))), Session: session}
+	switch opts.By {
+	case MeterBySession, MeterByModel, MeterByDay, MeterByRole:
+	default:
+		return opts, fmt.Errorf("%w %q: choose session, model, day or role", ErrMeterBy, by)
+	}
+	if since == "all" {
+		return opts, nil
+	}
+	back, err := time.ParseDuration(since)
+	if days, ok := strings.CutSuffix(since, "d"); ok {
+		var n int
+		// Bounded so the multiplication cannot overflow a duration.
+		if n, err = strconv.Atoi(days); err == nil && n <= 36500 {
+			back = time.Duration(n) * 24 * time.Hour
+		} else if err == nil {
+			back = 0
+		}
+	}
+	if err != nil || back <= 0 {
+		return opts, fmt.Errorf("%w %q: use a duration such as 90m, 24h or 7d, or all", ErrMeterSince, since)
+	}
+	opts.Since = now.Add(-back)
+	return opts, nil
 }
 
 // ErrAmbiguousSession is a session filter that names more than one session.

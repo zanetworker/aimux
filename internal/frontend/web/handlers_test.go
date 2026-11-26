@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/controller"
 	"github.com/zanetworker/aimux/internal/history"
+	"github.com/zanetworker/aimux/internal/ledger"
 	aimuxotel "github.com/zanetworker/aimux/internal/otel"
 	"github.com/zanetworker/aimux/internal/provider"
 	"github.com/zanetworker/aimux/internal/spawn"
@@ -1230,5 +1232,63 @@ func TestHandleCosts_UnknownProjectEmptyProvider(t *testing.T) {
 		if _, ok := c[k]; !ok {
 			t.Errorf("missing key %q in %v", k, c)
 		}
+	}
+}
+
+// GET /api/meter is the ledger's meter, the same report `aimux cost` prints: grouped as asked, with what could
+// not be counted said beside it.
+func TestHandleMeter(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "ledger")
+	w, err := ledger.OpenWriter(dir, "model-proxy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	for _, l := range []ledger.Line{
+		{Kind: ledger.KindModelCall, Session: "0b61f1d5-one", At: now.Add(-time.Hour), Role: "main", Engine: "anthropic", RequestModel: "claude-opus-5-5", ResponseModel: "claude-opus-5-5", InputTokens: 1000, OutputTokens: 100, Outcome: ledger.OutcomeOK},
+		{Kind: ledger.KindModelCall, Session: "0b61f1d5-one", At: now.Add(-time.Hour), Role: "subagent", Agent: "a1", Side: true, Engine: "codex", RequestModel: "codex:gpt-6.2-sol", ResponseModel: "codex:gpt-6.2-sol", InputTokens: 200, OutputTokens: 20, Outcome: ledger.OutcomeOK},
+		{Kind: ledger.KindModelCall, Session: "7c2a9e11-two", At: now.Add(-72 * time.Hour), Role: "main", Engine: "codex", RequestModel: "codex:gpt-6.2-sol", ResponseModel: "codex:gpt-6.2-sol", InputTokens: 50, OutputTokens: 5, Outcome: ledger.OutcomeOK},
+	} {
+		w.Write(l)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s := NewServer(0)
+	s.SetLedgerDir(dir)
+	get := func(query string) (int, controller.MeterReport, string) {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		s.handleMeter(rec, httptest.NewRequest(http.MethodGet, "/api/meter"+query, nil))
+		var report controller.MeterReport
+		_ = json.Unmarshal(rec.Body.Bytes(), &report)
+		return rec.Code, report, rec.Body.String()
+	}
+	// The default: by session, the last day.
+	code, report, body := get("")
+	if code != http.StatusOK || len(report.Rows) != 1 || report.Rows[0].Key != "0b61f1d5-one" || report.Rows[0].Requests != 2 || report.Files != 1 {
+		t.Fatalf("default: %d %s", code, body)
+	}
+	code, report, body = get("?by=role&since=all")
+	rows := map[string]int{}
+	for _, r := range report.Rows {
+		rows[r.Key] = r.Requests
+	}
+	if code != http.StatusOK || rows["main"] != 2 || rows["subagent"] != 1 || report.Total.Requests != 3 {
+		t.Fatalf("by role: %d %s", code, body)
+	}
+	if code, report, _ = get("?since=all&session=7c2a"); code != http.StatusOK || len(report.Rows) != 1 || report.Total.Requests != 1 {
+		t.Fatalf("one session: %d %+v", code, report)
+	}
+	// What cannot be read as asked is a 400 that says what to send instead, never an empty report.
+	for _, bad := range []string{"?by=week", "?since=soon"} {
+		if code, _, body := get(bad); code != http.StatusBadRequest || !strings.Contains(body, "error") {
+			t.Errorf("%s: %d %s", bad, code, body)
+		}
+	}
+	// A ledger nobody has written yet is an empty report with no files, not an error.
+	s.SetLedgerDir(filepath.Join(t.TempDir(), "none"))
+	if code, report, _ := get(""); code != http.StatusOK || report.Files != 0 || len(report.Rows) != 0 {
+		t.Fatalf("no ledger: %d %+v", code, report)
 	}
 }
