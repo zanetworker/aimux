@@ -311,7 +311,8 @@ func sessionContentSearch(q, dir string) ([]history.ContentMatch, error) {
 func createWebServer(port int) *web.Server {
 	cfg, _ := config.Load(config.DefaultPath())
 	// Merge project-local config if running from a project directory
-	if cwd, err := os.Getwd(); err == nil {
+	cwd, cwdErr := os.Getwd()
+	if cwdErr == nil {
 		cfg, _ = config.LoadProject(cwd, cfg)
 	}
 	home, _ := os.UserHomeDir() // "": the providers' own defaults
@@ -343,6 +344,11 @@ func createWebServer(port int) *web.Server {
 		s.SetComposeEngine(composeEngine)
 	}
 	s.SetDiscoverFunc(disco.Discover)
+	s.SetMachineReaders(web.MachineReaders{
+		Services:    cmd.ServicesReader(home, version),
+		ProxyDoctor: cmd.ProxyDoctorReader(home, version),
+		Engines:     cmd.EnginesReader(home, cwd), // cwd is "" when it is not known: the home folder's definitions alone
+	})
 	s.SetActivity(localActivity(registry, home))
 	s.SetSearchFunc(func(q string, automated bool) ([]search.Result, error) {
 		rs, _, err := interactiveSearch.Query(context.Background(), q, dashboardSearchOpts(automated))
