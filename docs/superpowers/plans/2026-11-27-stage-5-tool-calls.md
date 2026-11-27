@@ -12,7 +12,7 @@
 
 **A change from the design, for the owner to accept or refuse.** The design has a hook report each tool call through the collector, with a spool for when the collector is down. This plan has no reporting hook. What is given up, plainly:
 
-- Tool calls made while the collector is down are lost for good; a hook's spool would have kept them. The timeline says how many are missing by comparing with the transcript, and cannot recover them.
+- Tool calls made while the collector is down do not arrive, however short the outage (measured: 3 of 10 lost in a 3 second outage). They are added afterwards from the session's transcript (task 7), with their name and whether they failed, and without a duration, a turn or the model call that asked for them. Where the transcript is gone, they stay missing and the timeline says so.
 - A session with telemetry switched off is not recorded at all.
 - A hook is told the exact name of an MCP tool, whether a failure was an interrupt, and the kind of subagent on every tool event. Telemetry gives the first only with tool details on, does not give the second, and gives the third on model calls and at the subagent's end.
 
@@ -146,7 +146,19 @@ The ledger now depends on the collector, and nothing in aimux's settings says it
 - [ ] Test: the MCP proxy's line is never joined to a telemetry line by time or by process: two sessions calling the same tool at once would be mixed up. It is shown in the timeline only when the request carried the harness's call id; otherwise it is counted as a call the proxy carried for an unknown session.
 - [ ] Implement; `aimux mcp proxy status` reports `ledger_seq` and whether the ledger is off.
 
-### Task 7: The timeline
+### Task 7: What telemetry missed, from the transcript
+
+**Files:** Create `internal/controller/transcripttools.go`, `internal/otel/backfill.go`; tests beside them.
+
+**Interfaces:** Produces `controller.TranscriptTools(file string) ([]TranscriptTool, error)` with `TranscriptTool{CallID, Name, Agent string; Failed bool; At time.Time}`, read from the `tool_use` blocks and the `is_error` of their results in a session's transcript and its subagents' transcripts, and nothing else of them. The collector writes a `tool_call` line for each one the ledger does not hold for that session, with `aimux.source` `transcript`, once a session has been quiet for ten minutes and again when it ends.
+
+- [ ] Test: a session whose ledger lacks three calls of its transcript gains exactly those three, marked as from the transcript, with no duration; running it again adds nothing.
+- [ ] Test: no part of a tool's input or result is in a line: the reader is given a transcript whose inputs and results hold marked strings, and none appears in the ledger file.
+- [ ] Test: a call still running (a `tool_use` with no result yet) is not added; a call telemetry delivers late is not written twice.
+- [ ] Test: a transcript that is missing, unreadable or half-written adds nothing and is counted.
+- [ ] Implement.
+
+### Task 8: The timeline
 
 **Files:** Create `internal/controller/timeline.go`, `cmd/aimux/cmd/timeline.go`; modify `internal/frontend/web/handlers.go`, `server.go`, `smoke_test.go`; tests beside them.
 
@@ -160,7 +172,7 @@ The ledger now depends on the collector, and nothing in aimux's settings says it
 - [ ] Test (e2e): `aimux timeline <id> --json` validates; (smoke) the endpoint answers.
 - [ ] Implement.
 
-### Task 8: What kind of work a subagent did
+### Task 9: What kind of work a subagent did
 
 **Files:** Create `internal/controller/subagentwork.go`, test beside it; modify `cmd/aimux/cmd/cost.go`.
 
@@ -170,16 +182,16 @@ The ledger now depends on the collector, and nothing in aimux's settings says it
 - [ ] Test: `aimux cost --by subagent` prints kind of subagent, what it did, runs, model calls and tokens.
 - [ ] Implement. This replaces `scripts/helper-work.py` as the source for stage 6. The script stays for comparison until the two agree on the same week and the same runs (`general-purpose` only, the script's two write labels counted as one, failed write attempts counted the same way on both sides, runs with no tool lines set aside).
 
-### Task 9: Docs, tracker, and the owner's close
+### Task 10: Docs, tracker, and the owner's close
 
 - [ ] Docs: the ledger page; the cost guide (`--by tool`, `--by subagent`, `aimux timeline`); what the collector copies from telemetry and never copies; the parity table.
 - [ ] Tracker: stage 5 row; the unverified items 2, 4 and 14 with what was found; the change from the design in the decision log.
-- [ ] The owner's close, after a week of normal use: for three of his sessions, the timeline's own count of what is missing against the transcript is zero, or small and explained; `aimux timeline` on one shows its model calls, built-in tools and MCP tools in order; `aimux cost --by subagent` agrees with the script as task 8 says.
+- [ ] The owner's close, after a week of normal use: for three of his sessions, the timeline's own count of what is missing against the transcript is zero, or small and explained; `aimux timeline` on one shows its model calls, built-in tools and MCP tools in order; `aimux cost --by subagent` agrees with the script as task 9 says.
 - [ ] Then decide, from that week: is a reporting hook needed for what telemetry lost? The rules for it are kept in the evidence note (alert first, report second, its own switch, the reading side first, a reader that does not need the whole input).
 
 ## Not in this plan
 
-- A hook that reports tool calls (see task 9), and any hook that refuses one.
+- A hook that reports tool calls (see task 10), and any hook that refuses one.
 - The tool gateway's lines (sandboxed sessions): coordinated with the Wingman session, after this.
 - Model-call lines written from telemetry, for sessions that do not go through the proxy. The proxy gives each call an id of its own, so the two records of one call cannot be told to be the same, and a reader from before this plan would add both. It waits until the proxy's line carries the upstream's request id for every engine and the pairing is proven call by call.
 - Codex's telemetry: after Claude Code works, as the design orders it.
