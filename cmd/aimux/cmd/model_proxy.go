@@ -282,6 +282,14 @@ func newModelProxyServeCmd() *cobra.Command {
 			if onLimit != "" {
 				handlerOptions = append(handlerOptions, modelproxy.WithOnLimit(onLimit))
 			}
+			// Each Codex model's window, from Codex's own list, read when asked: the list is refreshed by Codex.
+			if userHome, err := os.UserHomeDir(); err == nil {
+				cache := modelproxy.CodexModelsCache(userHome, os.Getenv)
+				handlerOptions = append(handlerOptions, modelproxy.WithCodexWindows(func(model string) int {
+					window, _ := modelproxy.CodexContextWindow(cache, model)
+					return window
+				}))
+			}
 			if anthropic {
 				option, err := modelproxy.WithAnthropic(modelproxy.AnthropicUpstream)
 				if err != nil {

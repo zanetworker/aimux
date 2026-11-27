@@ -94,6 +94,8 @@ func main() {
 	}
 
 	in := bufio.NewScanner(os.Stdin)
+	// A long conversation arrives as one long line.
+	in.Buffer(make([]byte, 0, 1<<20), 64<<20)
 	out := json.NewEncoder(os.Stdout)
 	log, err := os.OpenFile(os.Getenv("AIMUX_FAKE_CODEX_LOG"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {

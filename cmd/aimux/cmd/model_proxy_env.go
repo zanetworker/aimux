@@ -67,6 +67,18 @@ func newModelProxyEnvCmd() *cobra.Command {
 				}
 				return fmt.Errorf(`this prints the proxy key, so it is not shown on a terminal; run it as: lines="$(%s)" && eval "$lines"`, again)
 			}
+			// The Codex model's context window, from Codex's own list of its models: Claude Code would take a
+			// million tokens for a model it does not know.
+			// A shell set for one Codex model is told that model's window. A shell where a session may be moved to
+			// any of them is told the smallest, which is safe for all.
+			if home, err := os.UserHomeDir(); err == nil && !o.off {
+				cache := modelproxy.CodexModelsCache(home, os.Getenv)
+				if o.codex {
+					o.contextWindow, _ = modelproxy.CodexContextWindow(cache, cmp.Or(o.model, modelproxy.DefaultCodexModel))
+				} else {
+					o.contextWindow, _ = modelproxy.CodexSmallestWindow(cache)
+				}
+			}
 			// The subagent role from the config file, when the file reads without a problem. A file that does not
 			// is not a reason to leave the shell unset: the role is then simply not carried.
 			if home, err := os.UserHomeDir(); err == nil && !o.off && !o.codex {
@@ -91,6 +103,25 @@ type envOpts struct {
 	model string // the Codex model; the default when empty
 	// subagentModel is the model the config file's subagent role stands for; empty when it sets none.
 	subagentModel string
+	// contextWindow is how many tokens of conversation the Codex model takes; 0 when that is not known.
+	contextWindow int
+}
+
+// windowLines is the lines that tell Claude Code the Codex model's context window, unless the shell holds a
+// value of the owner's own, which is left alone and said.
+func windowLines(tokens int, getenv func(string) string) (lines []string, said string) {
+	ours := modelproxy.PickerIsOurs(getenv(modelproxy.ContextWindowVar), getenv(modelproxy.ContextWindowMarker))
+	if tokens <= 0 {
+		// Not known for this model. A window aimux set earlier, for another model, does not stand in for it.
+		if ours {
+			return []string{"unset " + modelproxy.ContextWindowVar + " " + modelproxy.ContextWindowMarker}, ""
+		}
+		return nil, ""
+	}
+	if own := getenv(modelproxy.ContextWindowVar); own != "" && !ours {
+		return nil, " " + modelproxy.ContextWindowVar + " is set in this shell already and is left as it is."
+	}
+	return modelproxy.SessionEnvWindow(tokens), ""
 }
 
 // modelProxyEnv writes the lines to stdout and one sentence about them to stderr. Nothing reaches stdout unless
@@ -112,7 +143,8 @@ func modelProxyEnv(ctx context.Context, o envOpts, key func(context.Context) (st
 			held = getenv("ANTHROPIC_API_KEY") == secret
 		}
 		_, err := fmt.Fprintln(stdout, strings.Join(modelproxy.SessionEnvOff(marker, held, modelproxy.PickerIsOurs(getenv(modelproxy.PickerVar), getenv(modelproxy.PickerMarker)),
-			modelproxy.PickerIsOurs(getenv(modelproxy.SubagentModelVar), getenv(modelproxy.RolesMarker)), getenv(modelproxy.RolesMarker) != ""), "\n"))
+			modelproxy.PickerIsOurs(getenv(modelproxy.SubagentModelVar), getenv(modelproxy.RolesMarker)), getenv(modelproxy.RolesMarker) != "",
+			modelproxy.PickerIsOurs(getenv(modelproxy.ContextWindowVar), getenv(modelproxy.ContextWindowMarker)), getenv(modelproxy.ContextWindowMarker) != ""), "\n"))
 		return err
 	}
 	// With one of these set, Claude Code talks to that provider and never reads the base URL.
@@ -151,13 +183,15 @@ func modelProxyEnv(ctx context.Context, o envOpts, key func(context.Context) (st
 		if err != nil {
 			return err
 		}
+		window, windowSaid := windowLines(o.contextWindow, getenv)
+		lines = append(lines, window...)
 		// One chain: if the address cannot be set (a read-only variable), the key is not exported to wherever
 		// the old address points.
 		if _, err := fmt.Fprintln(stdout, strings.Join(lines, " &&\n")); err != nil {
 			return err
 		}
-		_, _ = fmt.Fprintf(stderr, "Claude Code sessions started from this shell now run on Codex (%s) through the model proxy on port %d. "+
-			"Undo with: eval \"$(aimux model proxy env --off)\"\n", cmp.Or(o.model, modelproxy.DefaultCodexModel), port)
+		_, _ = fmt.Fprintf(stderr, "Claude Code sessions started from this shell now run on Codex (%s) through the model proxy on port %d.%s "+
+			"Undo with: eval \"$(aimux model proxy env --off)\"\n", cmp.Or(o.model, modelproxy.DefaultCodexModel), port, windowSaid)
 		return nil
 	}
 	lines := modelproxy.SessionEnv(port, secret)
@@ -193,6 +227,9 @@ func modelProxyEnv(ctx context.Context, o envOpts, key func(context.Context) (st
 			roles = " Your own subagents that name no model use the one the subagent role names."
 		}
 	}
+	window, windowSaid := windowLines(o.contextWindow, getenv)
+	lines = append(lines, window...)
+	roles += windowSaid
 	if _, err := fmt.Fprintln(stdout, strings.Join(lines, " &&\n")); err != nil {
 		return err
 	}
