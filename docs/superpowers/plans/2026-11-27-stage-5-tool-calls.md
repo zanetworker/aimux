@@ -16,6 +16,8 @@
 - A session with telemetry switched off is not recorded at all.
 - A hook is told the exact name of an MCP tool, whether a failure was an interrupt, and the kind of subagent on every tool event. Telemetry gives the first only with tool details on, does not give the second, and gives the third on model calls and at the subagent's end.
 
+**The trace and the ledger are not the same thing.** The trace holds everything a session did, content included, in the collector's memory, as the harness reports it about itself. The ledger holds names, counts, timings and outcomes, on disk, with no content, and is the only record of what aimux itself did: which engine answered, a switch, a limit, later a routing choice. The trace is for "what exactly happened in this session"; the ledger is for "how much, on what, by whom, and is anything missing", over time and in a form that can be kept and shown. This plan builds the tool-call part of the ledger from the trace's events: the trace feeds the ledger and does not replace it.
+
 **Tech Stack:** Go; the existing `internal/ledger`, `internal/otel` (collector), `internal/mcpproxy`, `internal/controller`.
 
 **Spec:** `docs/superpowers/specs/2026-11-23-aimux-governance-metering-and-evals-design.md` (sections 1 to 3), `docs/ledger-identity.md`, `docs/superpowers/specs/2026-11-25-turn-identity.md`. Evidence: `docs/superpowers/specs/2026-11-27-tool-call-evidence.md`.
@@ -85,7 +87,22 @@ A reader finds a subagent's kind from that line whenever it reads, so a collecto
 - [ ] Send real events as protobuf to the installed collector on both of its paths (`/v1/logs` and `/`): does the session id it files them under equal Claude Code's `session.id`, or an alias of aimux's?
 - [ ] Record the results. If a kind of session loses tool calls that the transcript comparison cannot show, stop and bring it to the owner.
 
-### Task 2: The line
+### Task 2: The collector is a part of aimux
+
+The ledger now depends on the collector, and nothing in aimux's settings says it should run: it is in `aimux status` and `aimux upgrade`, and not in the parts list, the config, or `aimux setup`. Its job is still named `com.azaalouk.aimux-collect`, from before the others were `com.aimux.*`.
+
+**Files:** Modify `internal/parts/registry.go`, `internal/parts/settings.go`, `internal/parts/jobfile.go`, `internal/controller/partsmenu.go`, `internal/controller/upgrade.go`, `cmd/aimux/cmd/setup.go`, `cmd/aimux/cmd/collect.go`; tests beside them.
+
+**Interfaces:** Produces a part `collector` ("Collector": "receives your sessions' telemetry: traces, and the tool calls in the ledger"), with service `collector`; settings `parts.collector.enabled`, `parts.collector.port`, `parts.collector.ledger` (true by default); the service's label `com.aimux.collector`, with `LegacyLabels []string{"com.azaalouk.aimux-collect"}` on `parts.Service`.
+
+- [ ] Test: the part is in the list `aimux setup` shows, and `aimux enable collector` and `aimux disable collector` state it in the config and plan the change like the two proxies.
+- [ ] Test: `aimux setup --check` on a machine whose collector runs under the old label reports it as taken under management with a rename, and changes nothing; `--apply` writes the new job, starts it, waits for it to answer, and only then removes the old one. If the new one does not answer, the old job is put back and started, and the command says so and exits 1.
+- [ ] Test: `aimux status` and `aimux upgrade collector` find the collector under either label, and never report two.
+- [ ] Test: `parts.collector.ledger: false` starts the collector without a ledger writer, and its health says `ledger_off`.
+- [ ] Test (build tag `launchdlive`): the rename against the real launchd on a job of its own.
+- [ ] Implement. The owner runs the apply on his machine; it restarts the collector.
+
+### Task 3: The line
 
 **Files:** Modify `internal/ledger/line.go`, `internal/ledger/count.go`; tests beside them.
 
@@ -97,11 +114,11 @@ A reader finds a subagent's kind from that line whenever it reads, so a collecto
 - [ ] Test: `Count` still drops a repeated event id, and a secondary line whose call a primary line has.
 - [ ] Implement.
 
-### Task 3: The collector writes a line per tool call
+### Task 4: The collector writes a line per tool call
 
 **Files:** Create `internal/otel/toolcalls.go`; modify `internal/otel/receiver.go` (one call where a log event is handled, and health); `internal/ledger/writer.go`; tests beside them.
 
-**Interfaces:** Consumes task 2. Produces `otel.ToolCallLine(attrs map[string]any) (ledger.Line, bool)` and `otel.AgentLine(attrs map[string]any) (ledger.Line, bool)`, pure functions from one event's attributes to a line; `(*ledger.Writer).Append(ledger.Line) error`, which says when a line is not on disk. The collector's health gains `ledger_seq`, `ledger_failed`, `ledger_refused` (values that failed their check), `ledger_off`.
+**Interfaces:** Consumes task 3. Produces `otel.ToolCallLine(attrs map[string]any) (ledger.Line, bool)` and `otel.AgentLine(attrs map[string]any) (ledger.Line, bool)`, pure functions from one event's attributes to a line; `(*ledger.Writer).Append(ledger.Line) error`, which says when a line is not on disk. The collector's health gains `ledger_seq`, `ledger_failed`, `ledger_refused` (values that failed their check), `ledger_off`.
 
 - [ ] Test: the attributes of a real `tool_result` event (the names in the evidence note) give the line above; `success` `false` gives outcome `error` with its `error_type`; an `error_type` not on the list gives `other`.
 - [ ] Test: from events holding `prompt`, `prompt_text`, `tool_input`, `tool_parameters`, `user.email`, `user.id`, `user.account_uuid` and `organization.id`, none of their values is in the ledger file, except an MCP tool's server and name. A value put where an id belongs (a sentence as `tool_use_id`, a path as `agent_id`, a secret-looking word as `tool_name`) is left out or written `other`, and is not in the collector's log either.
@@ -111,25 +128,25 @@ A reader finds a subagent's kind from that line whenever it reads, so a collecto
 - [ ] Test: the span the collector stores for the event is what it stored before this change, compared field by field.
 - [ ] Implement.
 
-### Task 4: The meter stays right
+### Task 5: The meter stays right
 
 **Files:** Modify `internal/controller/meter.go`, its tests; `cmd/aimux/cmd/cost.go`.
 
 - [ ] Test: with tool-call lines and a gap in `collector.jsonl`, `aimux cost` shows the same requests and tokens as without them, and `incomplete` names the writer with the gap.
 - [ ] Test: `aimux cost --by tool` gives calls, failures and time per tool.
-- [ ] Implement. Release tasks 2 to 4 and run `aimux upgrade`: from here the owner's ledger holds his tool calls.
+- [ ] Implement. Release tasks 2 to 5 and run `aimux upgrade`: from here the owner's ledger holds his tool calls.
 
-### Task 5: The MCP proxy's lesser line
+### Task 6: The MCP proxy's lesser line
 
 **Files:** Modify `internal/mcpproxy/pool.go`, `internal/mcpproxy/server.go`, `internal/mcpproxy/daemon.go`; create `internal/mcpproxy/ledgerline.go`; tests beside them.
 
-**Interfaces:** Consumes task 2. Produces one `tool_call` line per `tools/call` in `mcp-proxy.jsonl`, marked `secondary`, with `aimux.tool.server`, `gen_ai.tool.name`, duration, outcome, and the call id when task 1 found one in the request.
+**Interfaces:** Consumes task 3. Produces one `tool_call` line per `tools/call` in `mcp-proxy.jsonl`, marked `secondary`, with `aimux.tool.server`, `gen_ai.tool.name`, duration, outcome, and the call id when task 1 found one in the request.
 
 - [ ] Test: a call through the proxy writes one secondary line; a failed start, a timeout, a result marked as an error, and a call the proxy refuses before forwarding each give outcome `error`; the arguments are not in the line.
 - [ ] Test: the MCP proxy's line is never joined to a telemetry line by time or by process: two sessions calling the same tool at once would be mixed up. It is shown in the timeline only when the request carried the harness's call id; otherwise it is counted as a call the proxy carried for an unknown session.
 - [ ] Implement; `aimux mcp proxy status` reports `ledger_seq` and whether the ledger is off.
 
-### Task 6: The timeline
+### Task 7: The timeline
 
 **Files:** Create `internal/controller/timeline.go`, `cmd/aimux/cmd/timeline.go`; modify `internal/frontend/web/handlers.go`, `server.go`, `smoke_test.go`; tests beside them.
 
@@ -143,7 +160,7 @@ A reader finds a subagent's kind from that line whenever it reads, so a collecto
 - [ ] Test (e2e): `aimux timeline <id> --json` validates; (smoke) the endpoint answers.
 - [ ] Implement.
 
-### Task 7: What kind of work a subagent did
+### Task 8: What kind of work a subagent did
 
 **Files:** Create `internal/controller/subagentwork.go`, test beside it; modify `cmd/aimux/cmd/cost.go`.
 
@@ -153,18 +170,19 @@ A reader finds a subagent's kind from that line whenever it reads, so a collecto
 - [ ] Test: `aimux cost --by subagent` prints kind of subagent, what it did, runs, model calls and tokens.
 - [ ] Implement. This replaces `scripts/helper-work.py` as the source for stage 6. The script stays for comparison until the two agree on the same week and the same runs (`general-purpose` only, the script's two write labels counted as one, failed write attempts counted the same way on both sides, runs with no tool lines set aside).
 
-### Task 8: Docs, tracker, and the owner's close
+### Task 9: Docs, tracker, and the owner's close
 
 - [ ] Docs: the ledger page; the cost guide (`--by tool`, `--by subagent`, `aimux timeline`); what the collector copies from telemetry and never copies; the parity table.
 - [ ] Tracker: stage 5 row; the unverified items 2, 4 and 14 with what was found; the change from the design in the decision log.
-- [ ] The owner's close, after a week of normal use: for three of his sessions, the timeline's own count of what is missing against the transcript is zero, or small and explained; `aimux timeline` on one shows its model calls, built-in tools and MCP tools in order; `aimux cost --by subagent` agrees with the script as task 7 says.
+- [ ] The owner's close, after a week of normal use: for three of his sessions, the timeline's own count of what is missing against the transcript is zero, or small and explained; `aimux timeline` on one shows its model calls, built-in tools and MCP tools in order; `aimux cost --by subagent` agrees with the script as task 8 says.
 - [ ] Then decide, from that week: is a reporting hook needed for what telemetry lost? The rules for it are kept in the evidence note (alert first, report second, its own switch, the reading side first, a reader that does not need the whole input).
 
 ## Not in this plan
 
-- A hook that reports tool calls (see task 8), and any hook that refuses one.
+- A hook that reports tool calls (see task 9), and any hook that refuses one.
 - The tool gateway's lines (sandboxed sessions): coordinated with the Wingman session, after this.
 - Model-call lines written from telemetry, for sessions that do not go through the proxy. The proxy gives each call an id of its own, so the two records of one call cannot be told to be the same, and a reader from before this plan would add both. It waits until the proxy's line carries the upstream's request id for every engine and the pairing is proven call by call.
 - Codex's telemetry: after Claude Code works, as the design orders it.
+- Sandbox verdicts from OpenShell's OCSF log (what a sandbox was allowed and refused): the collector's next reader after this one, and the input for policy from sessions. It belongs with the sandbox work (4d and 5d on the tracker), since it says nothing about model calls or cost. Exporting the ledger as OCSF, for tools that read it, is later still.
 - Whether a file changed was code or a document: that needs the file's name, which a line may not hold.
 - The TUI and dashboard views of the timeline (stage 5b).
