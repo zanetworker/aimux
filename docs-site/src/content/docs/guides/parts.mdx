@@ -255,6 +255,8 @@ FIX
   build: aimux upgrade model-proxy
 ```
 
+Once the proxy has passed on an answer from Anthropic, a last line says how much of your Claude plan is used and when it starts again, as that answer gave it: `Claude allowance: 53% of the week used, starts again in 3d13h (seen 3m ago)`. It is shown, not judged, and it is as old as the last answer; after a restart there is none until the next call. `aimux model proxy status`, the TUI's System view and the dashboard's System tab show the same line, and `--json` has it as `allowance`, a list of such lines, left out until there is one: `{"schema_version": 1, "port": ..., "verdict": ..., "findings": [...], "allowance": ["Claude allowance: ..."]}`. The figure is the plan of whoever sent the last request through the proxy, which on your machine is you, and the ages in the line are from when the screen last read it.
+
 | Check | What it looks at | When it is not ok |
 |---|---|---|
 | `service` | Whether something answers on the port, and whether it is the model proxy | `fail`: nothing answers, or something else listens there. `warn`: the proxy says it is degraded, with its reason |
@@ -275,7 +277,7 @@ The dashboard's server gives three of these reports as JSON, from the functions 
 | Address | The command it matches | What it answers with |
 |---|---|---|
 | `GET /api/services` | `aimux status --json` | The same document: `cli_build`, `services` (each with its `state`, `build` and `address`) and `attention`, what is wrong with the command that fixes it |
-| `GET /api/proxy/doctor` | `aimux model proxy doctor --json` | The same document (`port`, `verdict`, `findings`, each with a `level`, a `detail` and, where a command fixes it, a `fix`) with one difference: the finding about the shell is left out, since a page is not in one, so the `verdict` is the worst of the others |
+| `GET /api/proxy/doctor` | `aimux model proxy doctor --json` | The same document (`port`, `verdict`, `allowance` once the proxy has seen an answer that states it, `findings`, each with a `level`, a `detail` and, where a command fixes it, a `fix`) with one difference: the finding about the shell is left out, since a page is not in one, so the `verdict` is the worst of the others |
 | `GET /api/engines` | `aimux engine list --json` | The same document: `engines`, `roles` and `subagents`. The subagent definitions are those of your home folder and of the folder the dashboard was started in |
 
 When one of them cannot be read (a config file with a problem, a secret store that is locked), the answer is a 500 with an `error` saying why. The dashboard's [System tab](/guides/web-dashboard/#system) shows all three.

@@ -86,6 +86,9 @@ func runProxyDoctor(ctx context.Context, port int, d doctorDeps, asJSON bool, ou
 		}
 	} else {
 		writeProxyFindings(out, port, report.Findings)
+		for _, line := range report.Allowance {
+			_, _ = fmt.Fprintf(out, "\n%s\n", printable(line))
+		}
 	}
 	if report.Verdict == controller.FindingFail {
 		return errProxyFailing
@@ -104,7 +107,7 @@ func proxyDoctorReport(ctx context.Context, port int, d doctorDeps, shell bool) 
 	if !shell {
 		findings = slices.DeleteFunc(findings, func(f controller.ProxyFinding) bool { return f.ID == "shell" })
 	}
-	return controller.ProxyReport{SchemaVersion: 1, Port: port, Verdict: controller.ProxyVerdict(findings), Findings: findings}, nil
+	return controller.ProxyReport{SchemaVersion: 1, Port: port, Verdict: controller.ProxyVerdict(findings), Findings: findings, Allowance: facts.Allowance}, nil
 }
 
 // gatherProxyFacts reads everything DiagnoseProxy judges. An error is something that stops the reading itself
@@ -166,6 +169,9 @@ func gatherProxyFacts(ctx context.Context, port int, d doctorDeps) (controller.P
 			facts.CodexRunning = health.Codex.AppServerRunning
 			facts.CodexCheckOKAt, facts.CodexCheckErrorAt, facts.CodexCheckError = health.Probe.LastOKAt, health.Probe.LastErrorAt, health.Probe.LastError
 			facts.LedgerOff, facts.LedgerFailed = health.Ledger.Off, health.Ledger.Failed
+			for _, a := range health.Allowance {
+				facts.Allowance = append(facts.Allowance, allowanceName(a.Engine)+" allowance: "+allowanceLine(a, facts.Now))
+			}
 		}
 	}
 

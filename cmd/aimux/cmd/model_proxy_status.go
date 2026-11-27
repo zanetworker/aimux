@@ -120,11 +120,7 @@ func writeHealthTable(out io.Writer, addr string, health modelproxy.Health, pass
 		_, _ = fmt.Fprintf(table, "Ledger\t\t%s\n", line)
 	}
 	for _, a := range health.Allowance {
-		name := a.Engine
-		if a.Engine == parts.EngineAnthropic {
-			name = "Claude"
-		}
-		_, _ = fmt.Fprintf(table, "%s allowance\t\t%s\n", name, allowanceLine(a, now))
+		_, _ = fmt.Fprintf(table, "%s allowance\t\t%s\n", allowanceName(a.Engine), allowanceLine(a, now))
 	}
 	_ = table.Flush()
 }
@@ -162,6 +158,14 @@ func since(now, then time.Time) string {
 		return "just now"
 	}
 	return elapsed.String() + " ago"
+}
+
+// allowanceName is whose allowance an engine's is, as the owner knows it: Anthropic's is the Claude plan's.
+func allowanceName(engine string) string {
+	if engine == parts.EngineAnthropic {
+		return "Claude"
+	}
+	return engine
 }
 
 // allowanceLine says a plan's allowance as an engine's last answer gave it: the share used and when the window
