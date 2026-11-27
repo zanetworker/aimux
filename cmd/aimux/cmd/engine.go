@@ -273,17 +273,8 @@ func newEngineNamesCmd(env frontEnv, use, short, long, updateUse, updateShort st
 	return cmd
 }
 
-// engineRow is one engine as `aimux engine list` shows it.
-type engineRow struct {
-	Name    string `json:"name"`
-	On      bool   `json:"on"`
-	Type    string `json:"type"`
-	Auth    string `json:"auth,omitempty"`
-	URL     string `json:"url,omitempty"`
-	KeyAt   string `json:"key_at,omitempty"`
-	Running *bool  `json:"running,omitempty"` // what the running proxy says; absent when it does not say
-	Stated  bool   `json:"stated"`            // the file says something about this engine
-}
+// engineRow is one engine as `aimux engine list` shows it; the dashboard and the TUI show the same row.
+type engineRow = controller.EngineRow
 
 func newEngineListCmd(env frontEnv) *cobra.Command {
 	return &cobra.Command{
@@ -388,7 +379,7 @@ func engineRows(views []parts.EngineView, stated bool, running []string, answer 
 		if !seen[name] {
 			yes := true
 			// When the file lists engines, one that runs and is not listed is one the file says is off.
-			rows = append(rows, engineRow{Name: name, Type: "not in the file", Running: &yes, Stated: stated})
+			rows = append(rows, engineRow{Name: name, Type: controller.EngineNotInFile, Running: &yes, Stated: stated})
 		}
 	}
 	return rows
@@ -416,19 +407,8 @@ func writeEngines(out io.Writer, rows []engineRow, port, answer int, asJSON bool
 	_, _ = fmt.Fprintln(table, "ENGINE\tIN THE FILE\tRUNNING\tTYPE\tWHERE\tKEY")
 	differs, unstated := false, false
 	for _, r := range rows {
-		stated, running := "off", "-"
-		switch {
-		case r.Type == "not in the file":
-			stated = "-"
-		case !r.Stated:
-			stated, unstated = "not stated", true
-		case r.On:
-			stated = "on"
-		}
-		if r.Running != nil {
-			running = map[bool]string{true: "yes", false: "no"}[*r.Running]
-			differs = differs || (r.Stated && *r.Running != r.On)
-		}
+		stated, running, rowDiffers := r.Words()
+		differs, unstated = differs || rowDiffers, unstated || stated == "not stated"
 		kind, where := r.Type, printable(r.URL)
 		if r.Name == parts.EngineCodex {
 			where = "the Codex program, on your ChatGPT plan"

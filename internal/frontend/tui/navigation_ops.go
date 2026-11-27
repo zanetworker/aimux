@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -108,6 +109,36 @@ func (a App) sendMessageToSelected(text string) (tea.Model, tea.Cmd) {
 	}
 	a.statusHint = selected.ProviderName + " does not support messaging yet"
 	return a, nil
+}
+
+// systemMsg is one reading of this machine, for the System view.
+type systemMsg controller.SystemSnapshot
+
+// systemReadLimit bounds one reading: each part has its own shorter limit inside.
+const systemReadLimit = 10 * time.Second
+
+// SetSystemReader gives the app the function that reads this machine for the System view: the services, the
+// proxy's diagnosis, the engines and roles, the model calls. The program that builds the app supplies it.
+func (a *App) SetSystemReader(read func(context.Context) controller.SystemSnapshot) {
+	a.systemReader = read
+}
+
+// readSystem reads the machine off the UI thread and brings the reading back as a message.
+func (a App) readSystem() tea.Msg {
+	ctx, cancel := context.WithTimeout(context.Background(), systemReadLimit)
+	defer cancel()
+	return systemMsg(a.systemReader(ctx))
+}
+
+// openSystem opens the System view and starts a reading. The view keeps its last reading until the new one
+// arrives, and says it is reading when it has none.
+func (a App) openSystem() (tea.Model, tea.Cmd) {
+	if a.systemReader == nil {
+		a.statusHint = "This build has no way to read the services; use aimux status in a terminal"
+		return a, nil
+	}
+	model, _ := a.navigateTo(viewSystem, "System")
+	return model, a.readSystem
 }
 
 func (a App) openHealth() (tea.Model, tea.Cmd) {

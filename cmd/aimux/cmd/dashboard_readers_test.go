@@ -101,3 +101,40 @@ func TestEnginesDocument_FromTheFile(t *testing.T) {
 		t.Fatal("a broken config file gave no error")
 	}
 }
+
+// The TUI's one reading of the machine takes each part from the function its command prints from, and a part
+// that cannot be read says why without taking the others with it.
+func TestSystemReader(t *testing.T) {
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".aimux"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	config := "parts:\n  inference-proxy:\n    enabled: true\n    engines:\n      anthropic:\n        enabled: true\n"
+	if err := os.WriteFile(filepath.Join(home, ".aimux", "config.yaml"), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snap := SystemReader(home, "v0.14.0-289-gabc", "")(context.Background())
+	if snap.At.IsZero() || len(snap.Services.Services) != 4 || snap.Services.CLIBuild != "v0.14.0-289-gabc" {
+		t.Fatalf("services: %+v", snap.Services)
+	}
+	names := map[string]bool{}
+	for _, e := range snap.Engines {
+		names[e.Name] = e.On
+	}
+	if snap.EnginesErr != "" || !names["anthropic"] || !names["codex"] || len(snap.Roles) == 0 {
+		t.Fatalf("engines: %q %+v %+v", snap.EnginesErr, snap.Engines, snap.Roles)
+	}
+	// No ledger under this home: an empty meter that says no file was read, not an error.
+	if snap.MeterErr != "" || snap.Meter.Files != 0 || len(snap.Meter.Rows) != 0 {
+		t.Fatalf("meter: %q %+v", snap.MeterErr, snap.Meter)
+	}
+
+	// A config file with a problem fails the engines alone.
+	if err := os.WriteFile(filepath.Join(home, ".aimux", "config.yaml"), []byte("parts: [\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	broken := SystemReader(home, "v0.14.0-289-gabc", "")(context.Background())
+	if broken.EnginesErr == "" || len(broken.Services.Services) != 4 || broken.MeterErr != "" {
+		t.Fatalf("a broken config file: engines %q, services %d, meter %q", broken.EnginesErr, len(broken.Services.Services), broken.MeterErr)
+	}
+}

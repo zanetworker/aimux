@@ -27,7 +27,7 @@ func (a App) View() string {
 	// Set contextual hints based on current view
 	switch a.currentView {
 	case viewAgents:
-		a.headerView.SetHint("Enter:open  a:attend  *:pin  B:starred  t:traces  c:costs  T:tasks  S:sessions  P:plugins  H:health  C:copy-id  F:focus-tab  d:diff  :new:launch  x:kill  s:sort  /:filter  ?:help")
+		a.headerView.SetHint("Enter:open  a:attend  *:pin  B:starred  t:traces  c:costs  T:tasks  S:sessions  P:plugins  H:health  M:system  C:copy-id  F:focus-tab  d:diff  :new:launch  x:kill  s:sort  /:filter  ?:help")
 	case viewLogs:
 		a.headerView.SetHint("j/k:scroll  Enter:expand  a:annotate  N:note  *:pin  C:copy-id  $:costs  :export  :export-otel  Esc:back")
 	case viewCosts:
@@ -50,6 +50,8 @@ func (a App) View() string {
 	case viewHealth:
 		a.headerView.SetHint("Esc:back  :health to refresh")
 	case viewPlugin:
+		a.headerView.SetHint("j/k:scroll  d/u:page  r:refresh  Esc:back")
+	case viewSystem:
 		a.headerView.SetHint("j/k:scroll  d/u:page  r:refresh  Esc:back")
 	case viewHelp:
 		a.headerView.SetHint("Esc:back  q:quit")
@@ -93,6 +95,9 @@ func (a App) View() string {
 	case viewHealth:
 		a.healthView.SetSize(a.width, contentHeight)
 		content = a.healthView.View()
+	case viewSystem:
+		a.systemView.SetSize(a.width, contentHeight)
+		content = a.systemView.View()
 	case viewPlugin:
 		if a.pluginView != nil {
 			a.pluginView.SetSize(a.width, contentHeight)

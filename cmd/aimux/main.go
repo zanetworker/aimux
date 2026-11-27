@@ -66,6 +66,7 @@ func main() {
 
 		go func() { _ = interactiveSearch.Refresh(context.Background()) }() // first search finds a fresh index
 		app := tui.NewApp()
+		app.SetSystemReader(systemReader(home))
 		app.SetSessionSearch(sessionContentSearch)
 		if exec := createPluginExecutor(); exec != nil {
 			app.SetPluginExecutor(exec)
@@ -97,6 +98,7 @@ func main() {
 
 		go func() { _ = interactiveSearch.Refresh(context.Background()) }() // first search finds a fresh index
 		app := tui.NewApp()
+		app.SetSystemReader(systemReader(home))
 		app.SetSessionSearch(sessionContentSearch)
 		if exec := createPluginExecutor(); exec != nil {
 			app.SetPluginExecutor(exec)
@@ -306,6 +308,13 @@ func sessionContentSearch(q, dir string) ([]history.ContentMatch, error) {
 		out[i] = history.ContentMatch{SessionID: r.SessionID, FilePath: r.Path, Snippet: r.Snippet}
 	}
 	return out, nil
+}
+
+// systemReader reads this machine for the TUI's System view, from the functions the commands print from. The
+// subagent definitions of the folder aimux was started in are included, as aimux engine list run there has them.
+func systemReader(home string) func(context.Context) controller.SystemSnapshot {
+	cwd, _ := os.Getwd()
+	return cmd.SystemReader(home, version, cwd)
 }
 
 func createWebServer(port int) *web.Server {

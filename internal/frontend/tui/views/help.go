@@ -69,6 +69,7 @@ func (v *HelpView) View() string {
 	writeHelp(&b, "T", "Tasks view")
 	writeHelp(&b, "S", "Sessions browser (past sessions)")
 	writeHelp(&b, "H", "System health dashboard")
+	writeHelp(&b, "M", "System: services, model proxy, engines, model calls")
 	writeHelp(&b, ":new / :n", "Launch new agent (provider, dir, options)")
 	writeHelp(&b, "x", "Kill selected agent (with confirmation)")
 	writeHelp(&b, "s", "Sort: cycle Name/Cost/Age/Model/PID")
@@ -127,6 +128,7 @@ func (v *HelpView) View() string {
 	writeHelp(&b, ":teams :t", "Teams overview")
 	writeHelp(&b, ":costs :c", "Cost dashboard")
 	writeHelp(&b, ":health", "System health (providers + infra)")
+	writeHelp(&b, ":system", "Services, model proxy, engines and roles, model calls")
 	writeHelp(&b, ":quit :q", "Quit")
 	b.WriteString("\n")
 

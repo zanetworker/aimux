@@ -207,24 +207,7 @@ func gatherProxyFacts(ctx context.Context, port int, d doctorDeps) (controller.P
 }
 
 func writeProxyFindings(out io.Writer, port int, findings []controller.ProxyFinding) {
-	var fails, warns int
-	for _, f := range findings {
-		switch f.Level {
-		case controller.FindingFail:
-			fails++
-		case controller.FindingWarn:
-			warns++
-		}
-	}
-	head := "Nothing to fix."
-	switch {
-	case fails > 0 && warns > 0:
-		head = fmt.Sprintf("%s failing, %s to look at.", plural(fails, "thing is", "things are"), plural(warns, "thing", "things"))
-	case fails > 0:
-		head = plural(fails, "thing is", "things are") + " failing."
-	case warns > 0:
-		head = plural(warns, "thing", "things") + " to look at; nothing is failing."
-	}
+	head := controller.ProxyHeadline(findings)
 	_, _ = fmt.Fprintf(out, "Model proxy on 127.0.0.1:%d. %s\n\n", port, head)
 	table := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(table, "CHECK\tSTATE\tDETAIL")
