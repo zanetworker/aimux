@@ -15,13 +15,19 @@ for meta in glob.glob(os.path.expanduser("~/.claude/projects/*/*/subagents/*.met
     try: m = json.load(open(meta))
     except Exception: continue
     if m.get("agentType") != "general-purpose": continue
-    code = doc = 0; t = 0; names = set()
-    for line in open(meta[:-10] + ".jsonl", errors="ignore"):
+    code = doc = 0; t = 0; names = set(); counted = set()
+    try:
+        transcript = open(meta[:-10] + ".jsonl", errors="ignore")
+    except OSError:
+        continue  # a run whose transcript is gone is left out, not a reason to stop
+    for line in transcript:
         try: e = json.loads(line)
         except Exception: continue
         msg = e.get("message") or {}
         if e.get("type") != "assistant": continue
-        u = msg.get("usage") or {}
+        # One response is written as several lines, one per block, each repeating its usage: count it once.
+        u = {} if msg.get("id") in counted else (msg.get("usage") or {})
+        counted.add(msg.get("id"))
         t += (u.get("input_tokens") or 0) + (u.get("cache_read_input_tokens") or 0) + (u.get("cache_creation_input_tokens") or 0) + (u.get("output_tokens") or 0)
         for b in msg.get("content") if isinstance(msg.get("content"), list) else []:
             if isinstance(b, dict) and b.get("type") == "tool_use":
