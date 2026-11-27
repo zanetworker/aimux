@@ -127,7 +127,7 @@ The System tab shows, on one page, what four commands print (the TUI has the sam
 | Section | What it shows | The command behind it |
 |---|---|---|
 | Services | The model proxy, the MCP proxy, the tool gateway and the collector: state, build, how long each has been up, its address and its last activity. Below, what needs attention and its fix | `aimux status` |
-| Model proxy | A one-line verdict, then each thing that is failing or worth a look, with what to do. The checks that pass are folded away | `aimux model proxy doctor` |
+| Model proxy | A one-line verdict, then each thing that is failing or worth a look, with what to do. The checks that pass are folded away. Then how much of your Claude plan is used and when it starts again, as the proxy last saw it | `aimux model proxy doctor` |
 | Engines and roles | Each engine: what the config file states and whether the running proxy answers with it. The roles and the model each uses. Your subagent definitions and what each would run on | `aimux engine list` |
 | Model calls | Calls, failed calls and tokens from the ledger, by role, model, session or day, for the last day, week, month or all time. Tokens, not money | `aimux cost` |
 

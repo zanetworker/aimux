@@ -150,6 +150,10 @@ func (v *SystemView) page() string {
 		if passing > 0 {
 			note(fmt.Sprintf("%d %s", passing, map[bool]string{true: "check passes", false: "checks pass"}[passing == 1]))
 		}
+		// How much of each plan is left, as the proxy last saw it; nothing until an answer has said.
+		for _, line := range s.Doctor.Allowance {
+			sentence("  ", line, asIs)
+		}
 	}
 
 	section("ENGINES AND ROLES", "aimux engine list")
@@ -324,6 +328,7 @@ func plainSnapshot(s controller.SystemSnapshot) controller.SystemSnapshot {
 		findings[i] = controller.ProxyFinding{ID: plain(f.ID), Level: plain(f.Level), Detail: plain(f.Detail), Fix: plain(f.Fix)}
 	}
 	s.Doctor.Findings = findings
+	s.Doctor.Allowance = plainAll(s.Doctor.Allowance)
 	engines := make([]controller.EngineRow, len(s.Engines))
 	for i, e := range s.Engines {
 		e.Name, e.Type, e.Auth, e.URL, e.KeyAt = plain(e.Name), plain(e.Type), plain(e.Auth), plain(e.URL), plain(e.KeyAt)

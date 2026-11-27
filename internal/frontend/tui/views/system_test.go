@@ -20,10 +20,11 @@ func systemSnapshot(now time.Time) controller.SystemSnapshot {
 			{Name: "collector", State: controller.ServiceDown, Reason: "nothing answers", Address: "127.0.0.1:4318",
 				Attention: []controller.Attention{{Problem: "it does not answer", Fix: "aimux upgrade collector"}}},
 		}},
-		Doctor: controller.ProxyReport{Port: 7385, Verdict: controller.FindingWarn, Findings: []controller.ProxyFinding{
-			{ID: "service", Level: controller.FindingOK, Detail: "answers on 127.0.0.1:7385"},
-			{ID: "calls", Level: controller.FindingWarn, Detail: "2 calls hit anthropic's rate limit", Fix: "wait for the limit to pass"},
-		}},
+		Doctor: controller.ProxyReport{Port: 7385, Verdict: controller.FindingWarn,
+			Allowance: []string{"Claude allowance: 53% of the week used, starts again in 3d13h (seen 3m ago)"}, Findings: []controller.ProxyFinding{
+				{ID: "service", Level: controller.FindingOK, Detail: "answers on 127.0.0.1:7385"},
+				{ID: "calls", Level: controller.FindingWarn, Detail: "2 calls hit anthropic's rate limit", Fix: "wait for the limit to pass"},
+			}},
 		EnginesPort: 7385,
 		Engines: []controller.EngineRow{
 			{Name: "codex", On: true, Type: "codex-app-server", Stated: true, Running: &yes},
@@ -53,6 +54,7 @@ func TestSystemView_ShowsTheMachine(t *testing.T) {
 		"collector", "down", "nothing answers", "collector: it does not answer", "aimux upgrade collector",
 		// The diagnosis: its headline, what is worth a look and what to do; a passing check is counted, not listed.
 		"MODEL PROXY", "1 thing to look at; nothing is failing.", "2 calls hit anthropic's rate limit", "wait for the limit to pass", "1 check passes",
+		"Claude allowance: 53% of the week used, starts again in 3d13h (seen 3m ago)",
 		// Engines, with the difference between the file and the running proxy said.
 		"ENGINES", "codex", "anthropic", "off", "yes", "The running proxy and the file differ. To make them match: aimux setup --apply",
 		// Roles and subagent definitions.
@@ -139,6 +141,7 @@ func TestSystemView_ControlCharactersAreNotWritten(t *testing.T) {
 	snap := systemSnapshot(now)
 	snap.Subagents = []controller.SubagentRow{{Name: "sc\x1b[2Jout", DefinedIn: ".claude/agents", Model: "codex:\x1b]0;owned\agpt", RunsOn: "codex"}}
 	snap.Doctor.Findings[1].Detail = "calls \x1b[31mfailed\x07"
+	snap.Doctor.Allowance = []string{"Claude allowance: \x1b[2Jodd"}
 	snap.Services.Services[0].Reason = "odd\x1b[0m\r\nreason"
 	snap.EnginesErr = ""
 	snap.Meter.Rows[0].Key = "ma\x1bin"

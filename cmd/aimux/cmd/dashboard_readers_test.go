@@ -3,13 +3,18 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/zanetworker/aimux/internal/controller"
+	"github.com/zanetworker/aimux/internal/modelproxy"
 )
 
 // The dashboard's diagnosis is the doctor's, without the finding about the shell: a page is not in one, and the
@@ -136,5 +141,54 @@ func TestSystemReader(t *testing.T) {
 	broken := SystemReader(home, "v0.14.0-289-gabc", "")(context.Background())
 	if broken.EnginesErr == "" || len(broken.Services.Services) != 4 || broken.MeterErr != "" {
 		t.Fatalf("a broken config file: engines %q, services %d, meter %q", broken.EnginesErr, len(broken.Services.Services), broken.MeterErr)
+	}
+}
+
+// The diagnosis carries the plan allowance the proxy last saw, in the words aimux model proxy status prints, so
+// every screen that shows the diagnosis shows how much of the plan is left.
+func TestProxyDoctorReport_CarriesTheAllowance(t *testing.T) {
+	now := time.Now()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/healthz":
+			_ = json.NewEncoder(w).Encode(modelproxy.Liveness{
+				Service: modelproxy.LivenessService, Status: "ok", StartedAt: now, Engines: []string{"codex", "anthropic"},
+				Proof: modelproxy.LivenessProof(envTestKey, r.URL.Query().Get("challenge"), listenerPort(r)),
+			})
+		case "/health":
+			if r.Header.Get("x-api-key") != envTestKey {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(modelproxy.Health{Allowance: []modelproxy.EngineAllowance{{
+				Engine: "anthropic", SeenAt: now.Add(-3 * time.Minute),
+				Allowance: modelproxy.Allowance{Status: "allowed", Window: "seven_day", Used: 0.53, ResetsAt: now.Add(85 * time.Hour)},
+			}}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	_, portText, _ := net.SplitHostPort(server.Listener.Addr().String())
+	port, _ := strconv.Atoi(portText)
+	deps := doctorDeps{key: testKey, home: t.TempDir(), cliBuild: "v0.14.0-289-gabc", now: func() time.Time { return now }, getenv: func(string) string { return "" }}
+	report, err := proxyDoctorReport(context.Background(), port, deps, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Claude allowance: 53% of the week used, starts again in 3d13h (seen 3m ago)"
+	if len(report.Allowance) != 1 || report.Allowance[0] != want {
+		t.Fatalf("%q, want %q", report.Allowance, want)
+	}
+	raw, _ := json.Marshal(report)
+	if !strings.Contains(string(raw), `"allowance":["Claude allowance`) || strings.Contains(string(raw), envTestKey) {
+		t.Fatalf("%s", raw)
+	}
+
+	// A proxy that has seen no answer yet carries none, and the field is left out.
+	bare, err := proxyDoctorReport(context.Background(), proxyAnswering(t, "codex"), deps, false)
+	raw, _ = json.Marshal(bare)
+	if err != nil || len(bare.Allowance) != 0 || strings.Contains(string(raw), "allowance") {
+		t.Fatalf("%v %s", err, raw)
 	}
 }

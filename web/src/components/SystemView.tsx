@@ -136,6 +136,9 @@ function Doctor() {
       {data && (
         <>
           <Note><span style={{ color: 'var(--fg)' }}>{verdictLine(data.findings)}</span> Checked on port {data.port}.</Note>
+          {data.allowance?.map(line => (
+            <p key={line} style={{ margin: 0, fontSize: 12, color: 'var(--fg)', lineHeight: 1.5 }}>{line}</p>
+          ))}
           {open.length > 0 && (
             <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 10 }}>
               {open.map(f => (

@@ -40,6 +40,8 @@ type ProxyFacts struct {
 	// ProofUnsupported: the proxy is a build from before it could prove it holds the key.
 	ProofUnsupported bool
 
+	// Allowance is the plan allowance the proxy last saw, a line per engine; it is shown, not judged.
+	Allowance []string
 	// HealthRead: the keyed health answer was read, so the Codex and ledger facts below are known.
 	HealthRead bool
 	// HealthError is why the keyed health answer could not be read, from a proxy that proved it holds the key.
@@ -93,6 +95,9 @@ type ProxyReport struct {
 	Port          int            `json:"port"`
 	Verdict       string         `json:"verdict"`
 	Findings      []ProxyFinding `json:"findings"`
+	// Allowance is the plan allowance the proxy last saw in each engine's answers, a line each, as
+	// `aimux model proxy status` prints it; empty until an answer has said.
+	Allowance []string `json:"allowance,omitempty"`
 }
 
 // codexCheckStale is how old the last good Codex check may be. The proxy checks every two minutes.

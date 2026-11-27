@@ -20,7 +20,8 @@ export interface ServicesDoc { cli_build: string; services: Service[]; attention
 
 export interface Finding { id: string; level: 'ok' | 'warn' | 'fail' | string; detail: string; fix?: string; }
 
-export interface DoctorDoc { port: number; verdict: string; findings: Finding[]; }
+// allowance: the plan allowance the proxy last saw, a line per engine; absent until an answer has said.
+export interface DoctorDoc { port: number; verdict: string; findings: Finding[]; allowance?: string[]; }
 
 export interface Engine {
   name: string;
