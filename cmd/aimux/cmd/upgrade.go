@@ -81,6 +81,10 @@ func newUpgradeCmd() *cobra.Command {
 			"A service that was turned off is left as it is, with a note: it is upgraded once it is on again.\n" +
 			"The exit code is 1 if a service was not upgraded, or if one named on the command line is turned off.",
 		Args: cobra.ArbitraryArgs,
+		ValidArgsFunction: completeEach(func() []string {
+			ids, _ := upgradeTargets(nil)
+			return ids
+		}),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ids, err := upgradeTargets(args)
 			if err != nil {

@@ -97,6 +97,25 @@ When the file says nothing about engines, the column reads `not stated` and noth
 
 Stating an engine takes the inference proxy under management: the file gains `inference-proxy: enabled: true` if it was not listed. Once the file lists engines, they are the proxy's engines: one the job was started with by hand and the file does not list is dropped at the next apply, which the table shows before anything restarts.
 
+### Names on the Tab key
+
+With shell completion loaded, Tab completes the names these commands take. In zsh that is `source <(aimux completion zsh)` in `~/.zshrc`, after the line that runs `compinit` (add `autoload -Uz compinit && compinit` above it if your file has none); `aimux completion --help` lists the other shells. The engines, entries and roles are read from your config file at that moment, and only what the command would accept is offered; the parts, the services and the ways to group are fixed lists.
+
+| After | Tab offers |
+|---|---|
+| `aimux engine enable` | the engines that are off |
+| `aimux engine disable` | the engines that are on and that no entry under `models` names (never Codex, which is always on) |
+| `aimux engine remove` | the engines you added that no entry under `models` names |
+| `aimux engine model update` | your entries under `models`; the model after it is typed |
+| `aimux engine model delete` | the entries no role uses |
+| `aimux engine role update` | `subagent`, then your entries under `models` |
+| `aimux engine role delete` | the roles that are set |
+| `aimux enable`, `aimux disable` | the parts |
+| `aimux upgrade` | the services it handles, less the ones already on the line |
+| `aimux cost --by` | `session`, `model`, `day`, `role` |
+
+A config file with a problem offers no engines, entries or roles; the command itself says what is wrong when you run it. While the inference proxy is turned off in the file, only what takes something out is offered, since the rest would be refused.
+
 ## See what would change
 
 ```bash
