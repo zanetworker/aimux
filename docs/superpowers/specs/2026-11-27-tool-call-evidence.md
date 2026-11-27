@@ -25,10 +25,58 @@ Every event also carries `transcript_path`, `cwd`, `permission_mode` and `hook_e
 - **`prompt_id` identifies the turn directly.** The turn rule in `2026-11-25-turn-identity.md` has the hook count the user prompts in the transcript. Whether `prompt_id` or the count agrees better with the proxy's turn number is measured in task 1.
 - **No new process per tool call.** On the owner's machine `aimux remote hooks notify` already runs on `PostToolUse` and `PostToolUseFailure` (installed for permission alerts). Starting aimux once takes 22 ms at the median (15 runs of `aimux version`, at most 24 ms). The ledger rides the process that is already there.
 
+## Second run: telemetry beside hooks
+
+The owner asked why not OpenTelemetry. Claude Code already exports telemetry events to the collector in his sessions, so one two-turn session through the model proxy was observed three ways at once: its hooks, its telemetry (sent to a capture on a spare port as JSON), and its transcript. It made eleven tool calls: shell commands (one failing), a file read, a tool search, an MCP call, two subagents started together, and a subagent started by a subagent.
+
+### Completeness
+
+| Source | Tool calls seen |
+|---|---|
+| Transcript | 11 |
+| Hooks (`PostToolUse` and `PostToolUseFailure`) | 11 |
+| Telemetry (`tool_result`) | 11 |
+
+The same eleven ids in all three. The telemetry's 14 `api_request` events equal the 14 model calls the proxy wrote to the ledger for that session.
+
+### What each carries
+
+| Fact | Hook | Telemetry |
+|---|---|---|
+| Session, tool call id, tool name, duration, failed or not | yes | yes (`session.id`, `tool_use_id`, `tool_name`, `duration_ms`, `success`) |
+| The turn | `prompt_id` | `prompt.id`, the same value |
+| A class of failure, without its text | no (`error` is text) | yes (`error_type`, for example `ShellError`) |
+| The subagent | `agent_id` | `agent_id` |
+| The subagent that started this subagent | no | yes (`parent_agent_id`) |
+| The kind of subagent | `agent_type`, on tool events | `agent.name` on every model call (`api_request`), and `agent_type` on `subagent_completed` |
+| Which model call asked for a tool call | no | yes: `request_id` on `tool_result` matched an `api_request` for all 11 |
+| Model calls, with tokens, for a session that does not go through the proxy | no | yes (`api_request`) |
+| The name of an MCP tool | yes (`mcp__aimux__list_sessions`) | no: `tool_name` is `mcp_tool` |
+| Sizes of a tool's input and result, in bytes | no | yes |
+
+### What telemetry does badly
+
+- **It loses what it could not deliver.** With the capture down for the first 30 seconds of a session, the two tool calls made in that time never arrived; the three made after it came up did. Nothing is kept for later.
+- **MCP tool names need a setting that also sends content.** With `OTEL_LOG_TOOL_DETAILS=1` the events gain `tool_input` and `tool_parameters`: the command, the arguments. `tool_name` still reads `mcp_tool`. That setting stays off.
+- **It carries things a ledger line may not hold.** Every event has the account's email and ids; `user_prompt` has the prompt when prompt logging is on, which aimux turns on for traces. The collector must copy named fields only.
+- **Only sessions with telemetry switched on.** The owner's shells have it.
+
+### What hooks do badly
+
+- **The identifying fields come after the content.** A `PostToolUse` input is written `session_id`, …, `tool_name`, `tool_input`, `tool_response`, `tool_use_id`, `duration_ms`. Today's hook decodes the whole object under a 1 MiB cap, so a large result loses the id and the duration.
+- **A process per tool call**, on the hook the owner's permission alerts depend on.
+
+### Turns
+
+The session's four values of `prompt.id` map onto the proxy's turns 1 to 4 in order. A turn began not only when the owner typed: two began when a subagent that had been running in the background reported back. One subagent call was numbered turn 1 by the proxy and carried the second `prompt.id` in telemetry: the proxy gives a side call the turn that is current when the request arrives. `prompt.id` is the harness's own word for the turn, and where the two differ it is the one to believe.
+
+### Which carrier
+
+Telemetry, as the first and main source: it is complete on the normal path, it is already flowing, it costs nothing per tool call, it cannot disturb the permission alerts, and it carries three things nothing else does (the parent subagent, the model call behind a tool call, model calls of sessions outside the proxy). Its two gaps are known and can be shown: what was lost while the collector was down (every event has a sequence number per session, so a hole is visible), and MCP tool names (the MCP proxy's own line names the tool). A hook that reports is added only if a week of real use shows those gaps matter.
+
 ## Not measured
 
-- An MCP tool call: whether its events have the same shape, and what its `tool_name` looks like.
-- Whether an MCP request reaching the MCP proxy carries the `tool_use_id` (the tracker's unverified item 2).
-- The hook's cost with the report added, with a large tool result, and with the collector down (the tracker's unverified item 4).
-- A session with more than one subagent running at once, and a subagent started by a subagent.
+- Whether an MCP request reaching the MCP proxy carries the `tool_use_id`, which decides how its line is joined to the telemetry's.
+- How long telemetry keeps trying when the collector is down briefly (a restart of a few seconds), as against the 30 seconds tested.
+- Whether a session that ends at once after its last tool call still delivers its last batch.
 - The Codex harness.
