@@ -15,6 +15,7 @@ description: Keyboard shortcuts for the terminal dashboard.
 | `S` | Open sessions browser |
 | `t` | Open trace view |
 | `c` | Open costs view |
+| `M` | Open the System view: services, model proxy, engines and roles, model calls |
 | `/` | Search across agent traces |
 | `$` | Toggle cost-per-turn display |
 | `d` | Toggle diff view |
@@ -97,6 +98,19 @@ A session that is open leads its title with what it is doing: **needs you** (in 
 
 Press `/` from the agent list to search across all active agent traces. Type a query (file name, function, error message) and aimux highlights matching sessions. This searches inside the trace content, not just session titles.
 
+## System View
+
+`M` from the agent list, or `:system`, shows on one screen what four commands print: `aimux status`, `aimux model proxy doctor`, `aimux engine list` and `aimux cost --since 24h --by role`. It reads only; where something is wrong, the line gives the command that fixes it. The dashboard's [System tab](/guides/web-dashboard/#system) shows the same from the same functions.
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` | Scroll a line |
+| `d` / `u` | Scroll ten lines |
+| `r` | Read the machine again |
+| `Esc` | Back |
+
+The screen keeps its last reading while a new one is taken. A part that cannot be read says why, and the others stay.
+
 ## Command Palette
 
 Type `:` to open the command palette:
@@ -104,4 +118,5 @@ Type `:` to open the command palette:
 | Command | Action |
 |---------|--------|
 | `:new` | Launch new agent session |
+| `:system` | Open the System view (same as `M`) |
 | `:export-otel` | Export current trace via OTEL |

@@ -16,6 +16,8 @@ var (
 			Foreground(lipgloss.Color("#22C55E"))
 	healthFailStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#EF4444"))
+	systemWarnStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#F59E0B"))
 	healthDimStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#6B7280"))
 	healthLabelStyle = lipgloss.NewStyle().

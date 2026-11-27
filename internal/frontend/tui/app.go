@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"strings"
@@ -49,6 +50,7 @@ const (
 	viewTasks
 	viewHealth
 	viewPlugin
+	viewSystem
 )
 
 // tickMsg triggers periodic refresh.
@@ -118,6 +120,9 @@ type App struct {
 	sessionsLoadDir     string // the directory it scans ("" for all)
 	helpView       *views.HelpView
 	healthView     *views.HealthView
+	systemView     *views.SystemView
+	// systemReader reads this machine for the System view; nil when the program that built the app gave none.
+	systemReader func(context.Context) controller.SystemSnapshot
 
 	// Layout
 	layout *Layout
@@ -315,6 +320,7 @@ func NewApp() App {
 		teamsView:        views.NewTeamsView(),
 		helpView:         views.NewHelpView(),
 		healthView:       views.NewHealthView(),
+		systemView:       views.NewSystemView(),
 		tasksView:        views.NewTasksView(),
 		layout:           NewLayout(0, 0),
 		orchestrator:     orch,
@@ -676,6 +682,14 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			a.splitTrace.Reload()
+		}
+		return a, nil
+
+	case systemMsg:
+		// Two reads can be in flight; the one taken earlier never replaces the one taken later.
+		if snap := controller.SystemSnapshot(msg); !snap.At.Before(a.systemView.ReadAt()) {
+			a.systemView.SetSnapshot(snap)
+			a.statusHint = ""
 		}
 		return a, nil
 
@@ -1436,6 +1450,10 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if a.currentView == viewAgents {
 			return a.openHealth()
 		}
+	case "M":
+		if a.currentView == viewAgents {
+			return a.openSystem()
+		}
 	case "d":
 		if a.currentView == viewAgents && a.previewPane != nil {
 			if a.previewPane.IsDiffExpanded() {
@@ -1650,6 +1668,20 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if a.tasksView != nil {
 			a.tasksView.HandleKey(msg.String())
 		}
+	case viewSystem:
+		switch msg.String() {
+		case "j", "down":
+			a.systemView.Scroll(1)
+		case "k", "up":
+			a.systemView.Scroll(-1)
+		case "d":
+			a.systemView.Scroll(10)
+		case "u":
+			a.systemView.Scroll(-10)
+		case "r":
+			a.statusHint = "Reading this machine..."
+			return a, a.readSystem
+		}
 	case viewPlugin:
 		if a.pluginView != nil {
 			switch msg.String() {
@@ -1732,6 +1764,8 @@ func (a App) executeCommand(cmd string) (tea.Model, tea.Cmd) {
 		return a.openPlugins()
 	case "health":
 		return a.openHealth()
+	case "system":
+		return a.openSystem()
 	case "help":
 		return a.navigateTo(viewHelp, "Help")
 	case "export":
