@@ -9,6 +9,7 @@ import { RightPanel } from './components/RightPanel';
 import { SessionsTable } from './components/SessionsTable';
 import type { HistorySession } from './components/SessionsTable';
 import { LaunchDialog } from './components/LaunchDialog';
+import { SystemView } from './components/SystemView';
 import { PluginView } from './components/PluginView';
 import TasksPanel from './components/TasksPanel';
 import { TaskLaunchDialog } from './components/TaskLaunchDialog';
@@ -215,7 +216,7 @@ export default function App() {
             borderBottom: activeTab !== 'agents' ? '1px solid var(--border)' : 'none',
             flexShrink: 0,
           }}>
-            {(['agents', 'sessions', 'starred', ...pluginTabs.map(p => `plugin:${p.name}`)]).map(tab => (
+            {(['agents', 'sessions', 'starred', 'system', ...pluginTabs.map(p => `plugin:${p.name}`)]).map(tab => (
               <button
                 key={tab}
                 onClick={() => { setActiveTab(tab); setSelectedId(null); setSessionAgent(null); }}
@@ -236,6 +237,7 @@ export default function App() {
                 {tab === 'agents' ? `Live Agents (${agents.length})`
                   : tab === 'sessions' ? `Sessions${sessionCount !== null ? ` (${sessionCount})` : ''}`
                   : tab === 'starred' ? `★ Starred${starredCount > 0 ? ` (${starredCount})` : ''}`
+                  : tab === 'system' ? 'System'
                   : pluginTabs.find(p => `plugin:${p.name}` === tab)?.tab || tab}
               </button>
             ))}
@@ -302,6 +304,7 @@ export default function App() {
             onSessionsLoaded={(s) => { setCachedSessions(s); setStarredCount(s.filter(x => x.starred).length); }}
           />
         )}
+        {!panelFullscreen && activeTab === 'system' && <SystemView />}
         {!panelFullscreen && activeTab.startsWith('plugin:') && (() => {
           const p = pluginTabs.find(pt => `plugin:${pt.name}` === activeTab);
           return p ? <PluginView plugin={p} /> : null;
