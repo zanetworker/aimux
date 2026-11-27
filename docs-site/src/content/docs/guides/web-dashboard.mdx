@@ -31,6 +31,7 @@ Toggle between views using the tab bar:
 
 - **Live Agents** - Live agent cards with filtering and sorting
 - **Sessions** - Historical session table with search
+- **System** - The background services, the model proxy, the engines and the model calls
 - **Plugin tabs** - Custom dashboards from plugins (e.g., Skill Dashboard)
 
 ### List vs Card View
@@ -118,6 +119,19 @@ Search across all agent traces to find specific files, functions, or topics:
 This is useful for questions like "which agent edited auth.go?" or "who ran the database migration?".
 
 Content search uses the same ranked index as `aimux sessions` (`~/.aimux/search.db`): keyword ranking, plus semantic ranking when `OPENAI_API_KEY` is set. Each search first picks up session files that changed and embeds them in the background, so it doesn't wait for them; new messages match by keyword at once and usually join semantic ranking within seconds. Only the query itself is embedded inline (cached after the first time). If more than 20 sessions changed at once, they are not embedded automatically; run `aimux sessions index` to catch up. If the embedding API is unreachable, the work stays queued and the next search retries it, even if no files changed. One exception: when the index was written by a newer aimux build (several builds can share the file, one per open session), an older build uses it as it is without refreshing and logs a note once, and `aimux sessions index` refuses to rebuild it; update `aimux` to bring that build's search up to date.
+
+## System
+
+The System tab shows, on one page, what four commands print. It reads only: nothing is started, restarted or changed from it. Where something is wrong, the line says the command that fixes it.
+
+| Section | What it shows | The command behind it |
+|---|---|---|
+| Services | The model proxy, the MCP proxy, the tool gateway and the collector: state, build, how long each has been up, its address and its last activity. Below, what needs attention and its fix | `aimux status` |
+| Model proxy | A one-line verdict, then each thing that is failing or worth a look, with what to do. The checks that pass are folded away | `aimux model proxy doctor` |
+| Engines and roles | Each engine: what the config file states and whether the running proxy answers with it. The roles and the model each uses. Your subagent definitions and what each would run on | `aimux engine list` |
+| Model calls | Calls, failed calls and tokens from the ledger, by role, model, session or day, for the last day, week, month or all time. Tokens, not money | `aimux cost` |
+
+Services refresh every 15 seconds, the rest every minute. A section that cannot be read says why and keeps its last good answer. The finding about the shell that `aimux model proxy doctor` gives is not on the page, since a page is not in a shell; run the command in the terminal you want to check.
 
 ## Dark/Light Theme
 

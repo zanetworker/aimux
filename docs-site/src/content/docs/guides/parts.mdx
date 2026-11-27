@@ -259,4 +259,4 @@ The dashboard's server gives three of these reports as JSON, from the functions 
 | `GET /api/proxy/doctor` | `aimux model proxy doctor --json` | The same document (`port`, `verdict`, `findings`, each with a `level`, a `detail` and, where a command fixes it, a `fix`) with one difference: the finding about the shell is left out, since a page is not in one, so the `verdict` is the worst of the others |
 | `GET /api/engines` | `aimux engine list --json` | The same document: `engines`, `roles` and `subagents`. The subagent definitions are those of your home folder and of the folder the dashboard was started in |
 
-When one of them cannot be read (a config file with a problem, a secret store that is locked), the answer is a 500 with an `error` saying why. No page of the dashboard shows them yet.
+When one of them cannot be read (a config file with a problem, a secret store that is locked), the answer is a 500 with an `error` saying why. The dashboard's [System tab](/guides/web-dashboard/#system) shows all three.
