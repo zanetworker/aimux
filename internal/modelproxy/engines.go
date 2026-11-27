@@ -104,6 +104,13 @@ func SessionEnvOff(marker string, apiKeyIsProxyKey, pickerIsOurs bool, roles ...
 	if len(roles) > 1 && roles[1] {
 		names += " " + RolesMarker
 	}
+	// roles[2]: the context window is aimux's own. roles[3]: a marker of it is in the shell.
+	if len(roles) > 2 && roles[2] {
+		names += " " + ContextWindowVar
+	}
+	if len(roles) > 3 && roles[3] {
+		names += " " + ContextWindowMarker
+	}
 	return []string{names}
 }
 

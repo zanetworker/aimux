@@ -31,6 +31,16 @@ type handlerConfig struct {
 	allowances *allowances
 	// onLimit is what to do when a plan limit comes back: empty, or OnLimitReport.
 	onLimit string
+	// codexWindow gives a Codex model's context window in tokens, 0 when it is not known; nil knows none.
+	codexWindow func(model string) int
+}
+
+// windowOf is the context window of a Codex model, 0 when it is not known.
+func (c *handlerConfig) windowOf(model string) int {
+	if c.codexWindow == nil {
+		return 0
+	}
+	return c.codexWindow(model)
 }
 
 // WithRequestLog records one line per answered request, for `aimux model proxy stats`.
@@ -274,7 +284,7 @@ func serveMessage(w http.ResponseWriter, r *http.Request, backend Backend, confi
 	if request.Stream {
 		// Headers or earlier events may already have reached the client; a client that left mid-stream never
 		// saw message_stop, so the history should not count the request as delivered.
-		if err := stream.finish(reason, usage); err != nil {
+		if err := stream.finish(reason, shownUsage(usage, conversationTokens(request), config.windowOf(turn.Model))); err != nil {
 			failure = "stream_cut_short"
 		}
 		return
@@ -286,7 +296,8 @@ func serveMessage(w http.ResponseWriter, r *http.Request, backend Backend, confi
 	for _, tool := range tools {
 		message.Content = append(message.Content, responseBlock{Type: "tool_use", ID: tool.ID, Name: tool.Name, Input: tool.Input})
 	}
-	message.StopReason, message.Usage = &reason, usage
+	// The session is told the size of the conversation it holds; the ledger keeps what Codex used.
+	message.StopReason, message.Usage = &reason, shownUsage(usage, conversationTokens(request), config.windowOf(turn.Model))
 	if err := writeJSON(w, http.StatusOK, message); err != nil {
 		failure = "response_not_delivered"
 	}

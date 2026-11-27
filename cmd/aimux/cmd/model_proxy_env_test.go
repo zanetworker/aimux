@@ -386,3 +386,50 @@ func TestProxyEnv_TheSubagentRole(t *testing.T) {
 		}
 	}
 }
+
+// Claude Code takes a model it does not know to have a million tokens of room. A shell set for the proxy tells
+// it the Codex model's real window, in both forms, leaves a value of the owner's alone, and takes its own back.
+func TestProxyEnv_TheCodexContextWindow(t *testing.T) {
+	port := proxyAnswering(t, "codex", "anthropic")
+	run := func(o envOpts, shell map[string]string) (string, string) {
+		t.Helper()
+		var stdout, stderr bytes.Buffer
+		o.port = port
+		if err := modelProxyEnv(context.Background(), o, testKey, func(k string) string { return shell[k] }, &stdout, &stderr); err != nil {
+			t.Fatal(err)
+		}
+		return stdout.String(), stderr.String()
+	}
+	for _, o := range []envOpts{{contextWindow: 475000}, {codex: true, contextWindow: 475000}} {
+		out, _ := run(o, nil)
+		if !strings.Contains(out, "export CLAUDE_CODE_MAX_CONTEXT_TOKENS='475000'") || !strings.Contains(out, "export AIMUX_MODEL_PROXY_WINDOW='475000'") {
+			t.Errorf("codex %v:\n%s", o.codex, out)
+		}
+	}
+	// Not known: nothing is said about it, and nothing assumed.
+	if out, _ := run(envOpts{}, nil); strings.Contains(out, "CLAUDE_CODE_MAX_CONTEXT_TOKENS") {
+		t.Errorf("no window known:\n%s", out)
+	}
+	// The window is not known for the model now chosen: one aimux set earlier, for another model, goes.
+	out, _ := run(envOpts{codex: true}, map[string]string{"CLAUDE_CODE_MAX_CONTEXT_TOKENS": "475000", "AIMUX_MODEL_PROXY_WINDOW": "475000"})
+	if !strings.Contains(out, "unset CLAUDE_CODE_MAX_CONTEXT_TOKENS AIMUX_MODEL_PROXY_WINDOW") {
+		t.Errorf("an earlier window of aimux's own was left:\n%s", out)
+	}
+	// A value of the owner's own stays, and is said.
+	out, said := run(envOpts{contextWindow: 475000}, map[string]string{"CLAUDE_CODE_MAX_CONTEXT_TOKENS": "200000"})
+	_ = out
+	if strings.Contains(out, "CLAUDE_CODE_MAX_CONTEXT_TOKENS") || !strings.Contains(said, "CLAUDE_CODE_MAX_CONTEXT_TOKENS") {
+		t.Errorf("the owner's own value:\nstdout:\n%s\nstderr:\n%s", out, said)
+	}
+	noKey := func(context.Context) (string, error) { return "", errors.New("must not be asked") }
+	for value, gone := range map[string]bool{"475000": true, "200000": false} {
+		shell := map[string]string{"CLAUDE_CODE_MAX_CONTEXT_TOKENS": value, "AIMUX_MODEL_PROXY_WINDOW": "475000", "AIMUX_MODEL_PROXY_ENV": "engines"}
+		var off, stderr bytes.Buffer
+		if err := modelProxyEnv(context.Background(), envOpts{port: 1, off: true}, noKey, func(k string) string { return shell[k] }, &off, &stderr); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(off.String(), " CLAUDE_CODE_MAX_CONTEXT_TOKENS") != gone || !strings.Contains(off.String(), "AIMUX_MODEL_PROXY_WINDOW") {
+			t.Errorf("%s: --off printed %q", value, off.String())
+		}
+	}
+}
