@@ -176,11 +176,18 @@ func newEngineCmdWith(env frontEnv) *cobra.Command {
 		addApplyFlags(cmd, &noApply, &yes)
 		return cmd
 	}
+	enable := edit("enable <name>", "Switch an engine on: anthropic, or an upstream that was added", cobra.ExactArgs(1),
+		func(file string, a []string) error { return parts.EnableEngine(file, a[0]) }, nil)
+	disable := edit("disable <name>", "Switch an engine off and keep its settings", cobra.ExactArgs(1),
+		func(file string, a []string) error { return parts.DisableEngine(file, a[0]) }, nil)
+	remove := edit("remove <name>", "Forget an engine that was added", cobra.ExactArgs(1),
+		func(file string, a []string) error { return parts.RemoveEngine(file, a[0]) }, nil)
+	// Tab offers only what each would take: one that is off, one that is on, one that was added.
+	enable.ValidArgsFunction = completeEdit(env.Home, first(func(c parts.Candidates) []string { return c.Enable }))
+	disable.ValidArgsFunction = completeEdit(env.Home, first(func(c parts.Candidates) []string { return c.Disable }))
+	remove.ValidArgsFunction = completeEdit(env.Home, first(func(c parts.Candidates) []string { return c.Remove }))
 	engine.AddCommand(
-		edit("enable <name>", "Switch an engine on: anthropic, or an upstream that was added", cobra.ExactArgs(1),
-			func(file string, a []string) error { return parts.EnableEngine(file, a[0]) }, nil),
-		edit("disable <name>", "Switch an engine off and keep its settings", cobra.ExactArgs(1),
-			func(file string, a []string) error { return parts.DisableEngine(file, a[0]) }, nil),
+		enable, disable,
 		edit("add <name>=<address>", "Add an address that speaks the Messages API, paid for with your key, and switch it on", cobra.ExactArgs(1),
 			func(file string, a []string) error {
 				name, address, ok := strings.Cut(a[0], "=")
@@ -205,8 +212,7 @@ func newEngineCmdWith(env frontEnv) *cobra.Command {
 					_, _ = fmt.Fprintf(out, "\nIts key is expected in the secret-store entry %s-key, which is not there yet. This asks for it without showing it:\n  security add-generic-password -a \"$USER\" -s %s-key -w\n", name, name)
 				}
 			}),
-		edit("remove <name>", "Forget an engine that was added", cobra.ExactArgs(1),
-			func(file string, a []string) error { return parts.RemoveEngine(file, a[0]) }, nil),
+		remove,
 		newEngineListCmd(env),
 		newEngineNamesCmd(env, "model", "Name the models roles use: one place where a model name is written",
 			"A role names an entry here, never a model, so replacing a model is one change. A value is a model as a\n"+
@@ -215,7 +221,10 @@ func newEngineCmdWith(env frontEnv) *cobra.Command {
 			"update <entry> <model>", "Name a model, or give an entry another one",
 			func(file string, a []string) error { return parts.SetModel(file, a[0], a[1]) },
 			"delete <entry>", "Take an entry out; one a role still uses is refused",
-			func(file string, a []string) error { return parts.ClearModel(file, a[0]) }),
+			func(file string, a []string) error { return parts.ClearModel(file, a[0]) },
+			// The entry is offered; the model after it is typed.
+			completeEdit(env.Home, first(func(c parts.Candidates) []string { return c.Entries })),
+			completeEdit(env.Home, first(func(c parts.Candidates) []string { return c.FreeEntries }))),
 		newEngineNamesCmd(env, "role", "Say which model a kind of work uses",
 			"The one role is subagent: your own subagents that name no model. The main conversation's model is\n"+
 				"chosen in the session, and a kind of subagent that should differ names its model in its own definition,\n"+
@@ -223,17 +232,21 @@ func newEngineCmdWith(env frontEnv) *cobra.Command {
 			"update <role> <entry>", "Give a role an entry of models",
 			func(file string, a []string) error { return parts.SetRole(file, a[0], a[1]) },
 			"delete <role>", "Take a role out, so that work uses the session's model again",
-			func(file string, a []string) error { return parts.ClearRole(file, a[0]) }),
+			func(file string, a []string) error { return parts.ClearRole(file, a[0]) },
+			completeEdit(env.Home, func(c parts.Candidates, position int) []string {
+				return [][]string{c.Roles, c.Entries, nil}[min(position, 2)]
+			}),
+			completeEdit(env.Home, first(func(c parts.Candidates) []string { return c.SetRoles }))),
 	)
 	return engine
 }
 
 // newEngineNamesCmd is the pair of commands that change one entry of models or of roles. They change the file
 // and nothing else: no service runs differently for a role, which reaches a session through its shell.
-func newEngineNamesCmd(env frontEnv, use, short, long, updateUse, updateShort string, update func(string, []string) error, deleteUse, deleteShort string, remove func(string, []string) error) *cobra.Command {
+func newEngineNamesCmd(env frontEnv, use, short, long, updateUse, updateShort string, update func(string, []string) error, deleteUse, deleteShort string, remove func(string, []string) error, completeUpdate, completeDelete completer) *cobra.Command {
 	cmd := &cobra.Command{Use: use, Short: short, Long: long}
-	one := func(use, short string, n int, change func(string, []string) error) *cobra.Command {
-		return &cobra.Command{Use: use, Short: short, Args: cobra.ExactArgs(n), RunE: func(c *cobra.Command, a []string) error {
+	one := func(use, short string, n int, change func(string, []string) error, complete completer) *cobra.Command {
+		return &cobra.Command{Use: use, Short: short, Args: cobra.ExactArgs(n), ValidArgsFunction: complete, RunE: func(c *cobra.Command, a []string) error {
 			c.SilenceUsage = true
 			if env.Home == "" {
 				return errors.New("the home folder is not known, so the config file cannot be found; set HOME")
@@ -256,7 +269,7 @@ func newEngineNamesCmd(env frontEnv, use, short, long, updateUse, updateShort st
 			return nil
 		}}
 	}
-	cmd.AddCommand(one(updateUse, updateShort, 2, update), one(deleteUse, deleteShort, 1, remove))
+	cmd.AddCommand(one(updateUse, updateShort, 2, update, completeUpdate), one(deleteUse, deleteShort, 1, remove, completeDelete))
 	return cmd
 }
 
@@ -456,6 +469,12 @@ func newPartSwitchCmd(env frontEnv, on bool) *cobra.Command {
 	var noApply, yes bool
 	cmd := &cobra.Command{
 		Use: use, Short: short, Args: cobra.ExactArgs(1),
+		ValidArgsFunction: completeWords(func(position int, _ []string) []string {
+			if position > 0 {
+				return nil
+			}
+			return slices.Clone(ids)
+		}),
 		Long: short + ": " + strings.Join(ids, ", ") + ".\n\n" +
 			"It states it in the parts section of ~/.aimux/config.yaml and then makes that part's service match, asking\n" +
 			"before a restart or a stop (--yes agrees to either). What the file says about another part waits for\n" +

@@ -52,6 +52,8 @@ func newCostCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&since, "since", "24h", "How far back: a duration such as 90m, 24h or 7d, or all")
 	cmd.Flags().StringVar(&by, "by", "session", "Group by session, model, day or role (main, subagent, background)")
+	_ = cmd.RegisterFlagCompletionFunc("by", cobra.FixedCompletions(
+		[]string{string(controller.MeterBySession), string(controller.MeterByModel), string(controller.MeterByDay), string(controller.MeterByRole)}, cobra.ShellCompDirectiveNoFileComp))
 	cmd.Flags().StringVar(&session, "session", "", "Only this session: its id, or the start of it")
 	return cmd
 }
