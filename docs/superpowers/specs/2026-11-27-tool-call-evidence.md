@@ -57,7 +57,7 @@ The same eleven ids in all three. The telemetry's 14 `api_request` events equal 
 ### What telemetry does badly
 
 - **It loses what it could not deliver.** With the capture down for the first 30 seconds of a session, the two tool calls made in that time never arrived; the three made after it came up did. Nothing is kept for later.
-- **MCP tool names need a setting that also sends content.** With `OTEL_LOG_TOOL_DETAILS=1` the events gain `tool_input` and `tool_parameters`: the command, the arguments. `tool_name` still reads `mcp_tool`. That setting stays off.
+- **MCP tool names come only with a setting that also sends content.** With `OTEL_LOG_TOOL_DETAILS=1` the events gain `tool_input` and `tool_parameters`: the command, the arguments. `tool_name` still reads `mcp_tool`; the server and the tool are inside `tool_parameters`. The sessions aimux starts have that setting on, and prompt logging too (`OTELEnv`, for the trace view), so the collector already receives that content and must copy named, checked fields only.
 - **It carries things a ledger line may not hold.** Every event has the account's email and ids; `user_prompt` has the prompt when prompt logging is on, which aimux turns on for traces. The collector must copy named fields only.
 - **Only sessions with telemetry switched on.** The owner's shells have it.
 
@@ -72,7 +72,7 @@ The session's four values of `prompt.id` map onto the proxy's turns 1 to 4 in or
 
 ### Which carrier
 
-Telemetry, as the first and main source: it is complete on the normal path, it is already flowing, it costs nothing per tool call, it cannot disturb the permission alerts, and it carries three things nothing else does (the parent subagent, the model call behind a tool call, model calls of sessions outside the proxy). Its two gaps are known and can be shown: what was lost while the collector was down (every event has a sequence number per session, so a hole is visible), and MCP tool names (the MCP proxy's own line names the tool). A hook that reports is added only if a week of real use shows those gaps matter.
+Telemetry, as the first and main source: it is complete on the normal path, it is already flowing, it costs nothing per tool call, it cannot disturb the permission alerts, and it carries three things nothing else does (the parent subagent, the model call behind a tool call, model calls of sessions outside the proxy). Its two gaps are known and can be shown: what was lost while the collector was down (shown by comparing the ids in the ledger with those in the transcript; the events' own sequence number does not show it, since it counts every kind of event for a process and is not reset or kept across sessions), and MCP tool names (present when tool details are on). A hook that reports is added only if a week of real use shows those gaps matter.
 
 ## Not measured
 
