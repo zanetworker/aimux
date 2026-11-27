@@ -248,3 +248,15 @@ FIX
 | `shell` | Whether the shell you ran it in points at this proxy, and at an engine it has | `fail`: the engine is off; `aimux engine enable <name>` |
 
 The `FIX` section lists a command only for the checks that have one; a rate limit, for instance, has none, and in `--json` such a finding has no `fix`. It reads only: nothing is started, restarted or changed, and no tokens are spent. The proxy key is sent only to a listener that first proved it holds the same key, and only down the connection that proof came back on. When nothing answers, the checks that need an answer are left out instead of guessed. It exits 1 when something is failing; a warning alone exits 0. With `--json` it prints `{"schema_version": 1, "port", "verdict", "findings": [{"id", "level", "detail", "fix"}]}`, `verdict` being the worst level.
+
+## The same answers for the dashboard
+
+The dashboard's server gives three of these reports as JSON, from the functions the commands print from, so a page and a terminal cannot disagree. Each reads only.
+
+| Address | The command it matches | What it answers with |
+|---|---|---|
+| `GET /api/services` | `aimux status --json` | The same document: `cli_build`, `services` (each with its `state`, `build` and `address`) and `attention`, what is wrong with the command that fixes it |
+| `GET /api/proxy/doctor` | `aimux model proxy doctor --json` | The same document (`port`, `verdict`, `findings`, each with a `level`, a `detail` and, where a command fixes it, a `fix`) with one difference: the finding about the shell is left out, since a page is not in one, so the `verdict` is the worst of the others |
+| `GET /api/engines` | `aimux engine list --json` | The same document: `engines`, `roles` and `subagents`. The subagent definitions are those of your home folder and of the folder the dashboard was started in |
+
+When one of them cannot be read (a config file with a problem, a secret store that is locked), the answer is a 500 with an `error` saying why. No page of the dashboard shows them yet.

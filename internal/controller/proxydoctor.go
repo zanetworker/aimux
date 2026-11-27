@@ -86,6 +86,15 @@ type ProxyFinding struct {
 	Fix    string `json:"fix,omitempty"`
 }
 
+// ProxyReport is a diagnosis as a frontend shows it: the port that was asked, the findings, and the worst level
+// among them.
+type ProxyReport struct {
+	SchemaVersion int            `json:"schema_version"`
+	Port          int            `json:"port"`
+	Verdict       string         `json:"verdict"`
+	Findings      []ProxyFinding `json:"findings"`
+}
+
 // codexCheckStale is how old the last good Codex check may be. The proxy checks every two minutes.
 const codexCheckStale = 15 * time.Minute
 

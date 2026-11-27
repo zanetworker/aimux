@@ -282,34 +282,61 @@ func newEngineListCmd(env frontEnv) *cobra.Command {
 			if env.Home == "" {
 				return errors.New("the home folder is not known, so the config file cannot be found; set HOME")
 			}
-			views, stated, err := parts.ListEngines(filepath.Join(env.Home, ".aimux", "config.yaml"))
+			cwd, _ := os.Getwd()
+			read, err := readEngines(c.Context(), env.Home, cwd)
 			if err != nil {
 				return err
 			}
-			service := parts.MustService("model-proxy")
-			port := parts.InstalledProxyPort(filepath.Join(env.Home, "Library", "LaunchAgents", service.Label+".plist"), modelproxy.StablePort)
-			ctx, cancel := context.WithTimeout(c.Context(), 2*time.Second)
-			defer cancel()
-			live, liveErr := readModelLiveness(ctx, fmt.Sprintf("127.0.0.1:%d", port))
-			answer := proxySilent
-			switch {
-			case liveErr != nil || live.Service != modelproxy.LivenessService:
-			case live.Engines == nil:
-				answer = proxyOlder
-			default:
-				answer = proxySays
-			}
-			// Roles, and what each of the owner's subagent definitions runs on, from the same file.
-			settings, _ := parts.Load(filepath.Join(env.Home, ".aimux", "config.yaml"))
-			proxy := settings.Parts["inference-proxy"]
-			dirs := []controller.SubagentDir{{Path: filepath.Join(env.Home, ".claude", "agents"), Label: "~/.claude/agents"}}
-			if cwd, err := os.Getwd(); err == nil && filepath.Join(cwd, ".claude", "agents") != dirs[0].Path {
-				dirs = append(dirs, controller.SubagentDir{Path: filepath.Join(cwd, ".claude", "agents"), Label: ".claude/agents"})
-			}
-			more := engineRoles{Roles: controller.RolesView(proxy, live.Engines), Subagents: controller.SubagentModels(dirs, proxy)}
-			return writeEngines(c.OutOrStdout(), engineRows(views, stated, live.Engines, answer), port, answer, jsonOutput, more)
+			return writeEngines(c.OutOrStdout(), read.rows, read.port, read.answer, jsonOutput, read.roles)
 		},
 	}
+}
+
+// enginesRead is everything `aimux engine list` shows.
+type enginesRead struct {
+	rows         []engineRow
+	port, answer int
+	roles        engineRoles
+}
+
+// readEngines joins what the config file under home states with what the running proxy answers with, and adds
+// the roles and the subagent definitions under home and, when cwd is named, under it. It reads only.
+func readEngines(ctx context.Context, home, cwd string) (enginesRead, error) {
+	views, stated, err := parts.ListEngines(filepath.Join(home, ".aimux", "config.yaml"))
+	if err != nil {
+		return enginesRead{}, err
+	}
+	service := parts.MustService("model-proxy")
+	port := parts.InstalledProxyPort(filepath.Join(home, "Library", "LaunchAgents", service.Label+".plist"), modelproxy.StablePort)
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	live, liveErr := readModelLiveness(ctx, fmt.Sprintf("127.0.0.1:%d", port))
+	answer := proxySilent
+	switch {
+	case liveErr != nil || live.Service != modelproxy.LivenessService:
+	case live.Engines == nil:
+		answer = proxyOlder
+	default:
+		answer = proxySays
+	}
+	// Roles, and what each of the owner's subagent definitions runs on, from the same file.
+	settings, _ := parts.Load(filepath.Join(home, ".aimux", "config.yaml"))
+	proxy := settings.Parts["inference-proxy"]
+	dirs := []controller.SubagentDir{{Path: filepath.Join(home, ".claude", "agents"), Label: "~/.claude/agents"}}
+	if cwd != "" && filepath.Join(cwd, ".claude", "agents") != dirs[0].Path {
+		dirs = append(dirs, controller.SubagentDir{Path: filepath.Join(cwd, ".claude", "agents"), Label: ".claude/agents"})
+	}
+	roles := engineRoles{Roles: controller.RolesView(proxy, live.Engines), Subagents: controller.SubagentModels(dirs, proxy)}
+	return enginesRead{rows: engineRows(views, stated, live.Engines, answer), port: port, answer: answer, roles: roles}, nil
+}
+
+// enginesDocument is the list as JSON: what `aimux engine list --json` prints and the dashboard reads.
+func enginesDocument(rows []engineRow, port int, roles engineRoles) map[string]any {
+	doc := map[string]any{"schema_version": 1, "port": port, "engines": rows, "roles": roles.Roles, "subagents": roles.Subagents}
+	if roles.Subagents == nil {
+		doc["subagents"] = []controller.SubagentRow{}
+	}
+	return doc
 }
 
 // What the running proxy said about its engines.
@@ -366,14 +393,10 @@ func writeEngines(out io.Writer, rows []engineRow, port, answer int, asJSON bool
 		roles = more[0]
 	}
 	if asJSON {
-		doc := map[string]any{"schema_version": 1, "port": port, "engines": rows}
-		if len(more) > 0 {
-			doc["roles"], doc["subagents"] = roles.Roles, roles.Subagents
-			if roles.Subagents == nil {
-				doc["subagents"] = []controller.SubagentRow{}
-			}
+		if len(more) == 0 {
+			return writeJSON(out, map[string]any{"schema_version": 1, "port": port, "engines": rows})
 		}
-		return writeJSON(out, doc)
+		return writeJSON(out, enginesDocument(rows, port, roles))
 	}
 	defer writeRoles(out, roles)
 	table := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)

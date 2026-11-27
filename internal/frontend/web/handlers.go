@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1298,4 +1299,46 @@ func (s *Server) handleMeter(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+}
+
+// machineLimit bounds one read of this machine's services: each probe has its own shorter limit inside.
+const machineLimit = 10 * time.Second
+
+// writeMachine answers one of the machine endpoints: 503 when the server was handed no reader for it, the
+// reader's document, or its error as JSON.
+func writeMachine[T any](w http.ResponseWriter, r *http.Request, what string, read func(context.Context) (T, error)) {
+	w.Header().Set("Content-Type", "application/json")
+	if read == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "this server was not given a way to read " + what})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), machineLimit)
+	defer cancel()
+	doc, err := read(ctx)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	if err := json.NewEncoder(w).Encode(doc); err != nil {
+		debuglog.Log("encode %s response: %v", what, err)
+	}
+}
+
+// handleServices serves the background services and their health: what `aimux status --json` prints.
+func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
+	writeMachine(w, r, "the services", s.machine.Services)
+}
+
+// handleProxyDoctor serves the model proxy's diagnosis: what `aimux model proxy doctor --json` prints, without
+// the finding about the shell, since a page is not in one.
+func (s *Server) handleProxyDoctor(w http.ResponseWriter, r *http.Request) {
+	writeMachine(w, r, "the model proxy's diagnosis", s.machine.ProxyDoctor)
+}
+
+// handleEngines serves the engines, the roles and the subagent definitions: what `aimux engine list --json`
+// prints.
+func (s *Server) handleEngines(w http.ResponseWriter, r *http.Request) {
+	writeMachine(w, r, "the engines", s.machine.Engines)
 }

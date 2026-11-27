@@ -64,21 +64,9 @@ func defaultStatusEnv(home, version string, cfg config.Config) statusEnv {
 func runStatus(_ context.Context, o controller.StatusOverview, out io.Writer, now time.Time, asJSON bool) error {
 	items, count := statusAttention(o)
 	if asJSON {
-		// The JSON carries what the table shows: the same problems with their fixes, and times in UTC.
-		wire := struct {
-			controller.StatusOverview
-			Attention []controller.Attention `json:"attention"`
-		}{StatusOverview: controller.StatusOverview{CLIBuild: o.CLIBuild, Services: slices.Clone(o.Services)}, Attention: items}
-		if wire.Attention == nil {
-			wire.Attention = []controller.Attention{}
-		}
-		for i := range wire.Services {
-			wire.Services[i].StartedAt = utcTime(wire.Services[i].StartedAt)
-			wire.Services[i].LastActivity = utcTime(wire.Services[i].LastActivity)
-		}
 		enc := json.NewEncoder(out)
 		enc.SetIndent("", "  ")
-		if err := enc.Encode(wire); err != nil {
+		if err := enc.Encode(statusDocument(o)); err != nil {
 			return fmt.Errorf("write status JSON: %w", err)
 		}
 	} else if err := writeStatusTable(o, out, now, items, count); err != nil {
@@ -88,6 +76,26 @@ func runStatus(_ context.Context, o controller.StatusOverview, out io.Writer, no
 		return fmt.Errorf("%s", plural(count, "service needs attention", "services need attention"))
 	}
 	return nil
+}
+
+// statusWire is the status as JSON: what `aimux status --json` prints and the dashboard reads.
+type statusWire struct {
+	controller.StatusOverview
+	Attention []controller.Attention `json:"attention"`
+}
+
+// statusDocument carries what the table shows: the same problems with their fixes, and times in UTC.
+func statusDocument(o controller.StatusOverview) statusWire {
+	items, _ := statusAttention(o)
+	wire := statusWire{StatusOverview: controller.StatusOverview{CLIBuild: o.CLIBuild, Services: slices.Clone(o.Services)}, Attention: items}
+	if wire.Attention == nil {
+		wire.Attention = []controller.Attention{}
+	}
+	for i := range wire.Services {
+		wire.Services[i].StartedAt = utcTime(wire.Services[i].StartedAt)
+		wire.Services[i].LastActivity = utcTime(wire.Services[i].LastActivity)
+	}
+	return wire
 }
 
 // statusAttention lists unhealthy services' items first. The controller has already given every down or degraded

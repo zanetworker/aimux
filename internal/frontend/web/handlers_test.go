@@ -2,7 +2,9 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1290,5 +1292,77 @@ func TestHandleMeter(t *testing.T) {
 	s.SetLedgerDir(filepath.Join(t.TempDir(), "none"))
 	if code, report, _ := get(""); code != http.StatusOK || report.Files != 0 || len(report.Rows) != 0 {
 		t.Fatalf("no ledger: %d %+v", code, report)
+	}
+}
+
+// GET /api/services, /api/proxy/doctor and /api/engines serve what `aimux status`, `aimux model proxy doctor` and
+// `aimux engine list` print, from readers the composition root hands the server: the same functions, so a page
+// and a terminal cannot disagree.
+func TestHandleMachine(t *testing.T) {
+	get := func(s *Server, path string) (int, map[string]any, string) {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		handler := map[string]http.HandlerFunc{"/api/services": s.handleServices, "/api/proxy/doctor": s.handleProxyDoctor, "/api/engines": s.handleEngines}[path]
+		handler(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		var doc map[string]any
+		_ = json.Unmarshal(rec.Body.Bytes(), &doc)
+		return rec.Code, doc, rec.Body.String()
+	}
+	paths := []string{"/api/services", "/api/proxy/doctor", "/api/engines"}
+
+	// A server handed no readers says so, as JSON, and is not a server error.
+	for _, path := range paths {
+		code, doc, body := get(NewServer(0), path)
+		if code != http.StatusServiceUnavailable || doc["error"] == "" || doc["error"] == nil {
+			t.Errorf("%s with no reader: %d %s", path, code, body)
+		}
+	}
+
+	s := NewServer(0)
+	s.SetMachineReaders(MachineReaders{
+		Services: func(context.Context) (any, error) {
+			return controller.StatusOverview{CLIBuild: "326", Services: []controller.ServiceStatus{
+				{Name: "model proxy", State: controller.ServiceOK, Build: "326", Address: "127.0.0.1:7386"},
+				{Name: "collector", State: controller.ServiceDown, Reason: "nothing answers", Attention: []controller.Attention{{Problem: "collector is down", Fix: "aimux upgrade collector"}}},
+			}}, nil
+		},
+		ProxyDoctor: func(context.Context) (controller.ProxyReport, error) {
+			return controller.ProxyReport{Port: 7386, Verdict: controller.FindingWarn, Findings: []controller.ProxyFinding{
+				{ID: "calls", Level: controller.FindingWarn, Detail: "2 of 40 calls failed in the last hour"},
+			}}, nil
+		},
+		Engines: func(context.Context) (any, error) {
+			return map[string]any{"port": 7386, "engines": []map[string]any{{"name": "codex", "on": true}}}, nil
+		},
+	})
+	code, doc, body := get(s, "/api/services")
+	services, _ := doc["services"].([]any)
+	if code != http.StatusOK || doc["cli_build"] != "326" || len(services) != 2 {
+		t.Fatalf("services: %d %s", code, body)
+	}
+	if down, _ := services[1].(map[string]any); down["state"] != "down" || !strings.Contains(body, "aimux upgrade collector") {
+		t.Errorf("the service that is down, and its fix, are not in: %s", body)
+	}
+	code, doc, body = get(s, "/api/proxy/doctor")
+	if findings, _ := doc["findings"].([]any); code != http.StatusOK || doc["verdict"] != "warn" || len(findings) != 1 {
+		t.Fatalf("doctor: %d %s", code, body)
+	}
+	if code, _, body = get(s, "/api/engines"); code != http.StatusOK || !strings.Contains(body, `"codex"`) {
+		t.Fatalf("engines: %d %s", code, body)
+	}
+
+	// A reader that could not read says why, as JSON.
+	s.SetMachineReaders(MachineReaders{
+		Services: func(context.Context) (any, error) { return nil, errors.New("the home folder is not known") },
+		ProxyDoctor: func(context.Context) (controller.ProxyReport, error) {
+			return controller.ProxyReport{}, errors.New("read the model proxy key: the secret store is locked")
+		},
+		Engines: func(context.Context) (any, error) { return nil, errors.New("config.yaml: line 3: not a mapping") },
+	})
+	for _, path := range paths {
+		code, doc, body := get(s, path)
+		if text, _ := doc["error"].(string); code != http.StatusInternalServerError || text == "" {
+			t.Errorf("%s with a failing reader: %d %s", path, code, body)
+		}
 	}
 }

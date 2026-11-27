@@ -36,6 +36,8 @@ type Server struct {
 	cfg              config.Config
 	taskProvider     tasks.Provider
 	recentDirsFn     func(int) []RecentDirInfo
+	// machine reads this machine's services, proxy diagnosis and engines; see SetMachineReaders.
+	machine MachineReaders
 	// ledgerDir is where /api/meter reads the ledger; empty: ~/.aimux/ledger.
 	ledgerDir string
 	searchFn         func(query string, includeAutomated bool) ([]search.Result, error)
@@ -58,6 +60,19 @@ func NewServer(port int) *Server {
 // SetFocuser replaces how the server raises an agent's terminal pane.
 // SetLedgerDir says where the ledger is read from, for /api/meter. Unset, it is ~/.aimux/ledger.
 func (s *Server) SetLedgerDir(dir string) { s.ledgerDir = dir }
+
+// MachineReaders is how the server reads what `aimux status`, `aimux model proxy doctor` and `aimux engine list`
+// print. The composition root supplies them, so the dashboard and the terminal answer from the same functions.
+// One left nil makes its endpoint answer 503.
+type MachineReaders struct {
+	// Services is the document `aimux status --json` prints.
+	Services    func(context.Context) (any, error)
+	ProxyDoctor func(context.Context) (controller.ProxyReport, error)
+	// Engines is the document `aimux engine list --json` prints: engines, roles and subagent definitions.
+	Engines func(context.Context) (any, error)
+}
+
+func (s *Server) SetMachineReaders(m MachineReaders) { s.machine = m }
 
 func (s *Server) SetFocuser(f controller.Focuser) {
 	s.focuser = f
@@ -216,6 +231,9 @@ func (s *Server) Start() error {
 
 	mux.HandleFunc("GET /api/costs", s.handleCosts)
 	mux.HandleFunc("GET /api/meter", s.handleMeter)
+	mux.HandleFunc("GET /api/services", s.handleServices)
+	mux.HandleFunc("GET /api/proxy/doctor", s.handleProxyDoctor)
+	mux.HandleFunc("GET /api/engines", s.handleEngines)
 	mux.HandleFunc("GET /api/agents", s.handleAgents)
 	mux.HandleFunc("GET /api/agent-configs", s.handleAgentConfigs)
 	mux.HandleFunc("GET /api/environments", s.handleEnvironments)

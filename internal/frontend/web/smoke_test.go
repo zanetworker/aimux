@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -67,6 +68,11 @@ func TestAPISmoke_AllEndpoints(t *testing.T) {
 		return &stubParser{}
 	})
 	s.SetKillFunc(func(pid int, tmuxSession string) error { return nil })
+	s.SetMachineReaders(MachineReaders{
+		Services:    func(context.Context) (any, error) { return controller.StatusOverview{CLIBuild: "1"}, nil },
+		ProxyDoctor: func(context.Context) (controller.ProxyReport, error) { return controller.ProxyReport{Verdict: "ok"}, nil },
+		Engines:     func(context.Context) (any, error) { return map[string]any{"engines": []any{}}, nil },
+	})
 	s.SetController(controller.New(cfg))
 	s.SetTaskProvider(&mockTaskProvider{
 		lists: []tasks.TaskList{{ID: "test-list", Name: "Test"}},
@@ -102,6 +108,9 @@ func TestAPISmoke_AllEndpoints(t *testing.T) {
 		"/api/costs",
 		"/api/meter",
 		"/api/meter?by=role&since=7d",
+		"/api/services",
+		"/api/proxy/doctor",
+		"/api/engines",
 		"/api/teams",
 		"/api/health/providers",
 		"/api/health/remote",

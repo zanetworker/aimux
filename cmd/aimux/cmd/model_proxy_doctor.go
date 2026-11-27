@@ -76,23 +76,35 @@ func newModelProxyDoctorCmd() *cobra.Command {
 var errProxyFailing = errors.New("the model proxy has something to fix; see above")
 
 func runProxyDoctor(ctx context.Context, port int, d doctorDeps, asJSON bool, out io.Writer) error {
-	facts, err := gatherProxyFacts(ctx, port, d)
+	report, err := proxyDoctorReport(ctx, port, d, true)
 	if err != nil {
 		return err
 	}
-	findings := controller.DiagnoseProxy(facts)
-	verdict := controller.ProxyVerdict(findings)
 	if asJSON {
-		if err := writeJSON(out, map[string]any{"schema_version": 1, "port": port, "verdict": verdict, "findings": findings}); err != nil {
+		if err := writeJSON(out, report); err != nil {
 			return err
 		}
 	} else {
-		writeProxyFindings(out, port, findings)
+		writeProxyFindings(out, port, report.Findings)
 	}
-	if verdict == controller.FindingFail {
+	if report.Verdict == controller.FindingFail {
 		return errProxyFailing
 	}
 	return nil
+}
+
+// proxyDoctorReport reads and judges the model proxy on port. shell says whether the finding about the shell
+// this runs in belongs in it: a terminal's does, a page's does not.
+func proxyDoctorReport(ctx context.Context, port int, d doctorDeps, shell bool) (controller.ProxyReport, error) {
+	facts, err := gatherProxyFacts(ctx, port, d)
+	if err != nil {
+		return controller.ProxyReport{}, err
+	}
+	findings := controller.DiagnoseProxy(facts)
+	if !shell {
+		findings = slices.DeleteFunc(findings, func(f controller.ProxyFinding) bool { return f.ID == "shell" })
+	}
+	return controller.ProxyReport{SchemaVersion: 1, Port: port, Verdict: controller.ProxyVerdict(findings), Findings: findings}, nil
 }
 
 // gatherProxyFacts reads everything DiagnoseProxy judges. An error is something that stops the reading itself
