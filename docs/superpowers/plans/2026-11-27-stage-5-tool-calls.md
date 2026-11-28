@@ -23,14 +23,27 @@
 Four requirements from the owner shape this: everything connects to a session and an agent; more harnesses will come; some sessions run in a sandbox and some do not; and agent identity and acting on someone's behalf come later.
 
 ```text
+session                              the unit that is judged; everything below belongs to it
+└─ agent "root"                      the main conversation
+     ├─ model calls, tool calls
+     ├─ agent (a subagent)           started by root
+     │    └─ model calls, tool calls
+     └─ agent (a subagent)
+          └─ agent                   a subagent's own subagent
+               └─ model calls, tool calls
+
 session line   one per session    harness, its version, where it runs (host or sandbox, and which sandbox)
-                                  later: who the session acts for, and as whom
+                                  what started it, when known; later: who it acts for, and as whom
 agent line     one per subagent   its parent agent, its kind
 call lines     model calls and tool calls: session id, agent id, their own ids. Nothing about who or where.
 ```
 
+- **The session is the parent of everything.** An agent run is one agent's work inside one session, and the main conversation is itself an agent (`root`). Agents form a tree by their parents; a call belongs to exactly one agent. Three levels can be read, each the sum of the one below: the session, an agent run, a call. "Everything that happened in a session" is every line with its id, arranged by who started whom.
+- **Work that crosses sessions is linked only on evidence.** A session can be caused by another (the harness's own side work, a resumed or forked session, a command that starts a session). `aimux.started_by` on the `session` line names the session that started it when something in the request says so, and is left out otherwise. It is never inferred from timing.
+
 - **A call line carries ids only.** Who a session belongs to, which harness drives it and where it runs are facts of the session, written once on its `session` line. A fact that arrives later, such as an identity, is added there and reaches every call of the session without one call line changing.
 - **An agent is named by the harness's own id** (`aimux.agent`), with its parent (`aimux.agent_parent`). The main conversation is the agent `root`, said outright, so that it is never confused with the harness's side work (`background`) or with a call whose agent is not known (left out). An id means something only within its session and harness; nothing reads one without both. A subagent's kind is on its `agent` line.
+- **Names follow OpenTelemetry's conventions for AI where they exist**, as the ledger's fields already do, so the tree can later be written out as a trace (the session as the conversation, an agent run as an agent invocation, a model call as a chat, a tool call as a tool execution) for tools that read that, MLflow among them, or as an agent trajectory file. Exports are not built here; the names and the tree are kept so that an export is a conversion and not a redesign.
 - **Harnesses differ at the edge, not in the line.** The proxy already reads a request into neutral facts (`CallFacts`) before anything is written; tool facts join them. Another front (the Responses API, for the Codex CLI) fills the same facts. A line never has a field that only one harness can fill; what a harness cannot supply is left out.
 - **Where a session runs is a fact of the session:** `aimux.place` is `host` or `sandbox`, with `aimux.sandbox` (the sandbox's id) for the second. A sandboxed session's lines are the same lines. A place is written only on evidence, never assumed: this plan writes `host` when the request came from this machine's own loopback and leaves it out otherwise. A session can move (resumed elsewhere), so a `session` line is appended again when a fact of it changes, each with its time, and a reader takes the one in force at the time of a call.
 - **Every line says how it was learned** (`aimux.learned`): `seen` when aimux carried the call itself (the proxy), `reported` when the harness said so (telemetry), `verified` when a supervisor outside the agent recorded it (a sandbox's OCSF log, later). On the host the first two usually agree. In a sandbox the difference is the point: what an agent says about itself is a claim.
@@ -53,7 +66,7 @@ call lines     model calls and tool calls: session id, agent id, their own ids. 
 ```json
 {"kind":"session","writer":"model-proxy","session":"4a09fd61-…","aimux.harness":"claude-code","aimux.harness_version":"2.1.332","aimux.place":"host","aimux.learned":"seen"}
 {"kind":"agent","writer":"model-proxy","session":"4a09fd61-…","aimux.agent":"a896f925…","aimux.agent_parent":"a1c3e350…","aimux.learned":"seen"}
-{"kind":"model_call","writer":"model-proxy","session":"4a09fd61-…","aimux.agent":"a896f925…","turn":"2","call":"mc_9f…","aimux.request":"req_011ChU5A…", "…":"as today"}
+{"kind":"model_call","writer":"model-proxy","session":"4a09fd61-…","aimux.agent":"a896f925…","turn":"2","call":"mc_9f…","aimux.request":"req_011ChU5A…","aimux.reasoned":true, "…":"as today"}
 {"kind":"tool_call","writer":"model-proxy","event_id":"toolu_01Vu…:returned","at":"…","session":"4a09fd61-…","aimux.agent":"a896f925…","turn":"2",
  "call":"toolu_01Vu…","aimux.asked_by":"mc_9f…","gen_ai.tool.name":"search_messages","aimux.tool.server":"slack","aimux.outcome":"error","aimux.learned":"seen"}
 {"kind":"tool_call","writer":"collector","secondary":true,"session":"4a09fd61-…","call":"toolu_01Vu…","aimux.duration_ms":2453,"aimux.error_type":"ShellError","aimux.prompt_id":"c16292f4-…","aimux.learned":"reported"}
@@ -69,6 +82,7 @@ call lines     model calls and tool calls: session id, agent id, their own ids. 
 - `at` is when the request carrying the result arrived. Tools that ran together arrive together, so their order among themselves is not known from the proxy; the timeline says so, and uses the harness's own times where telemetry gave them.
 - `seen` means the proxy carried the call. Whether the tool succeeded is what the harness put in the result: the proxy saw the claim pass, it did not watch the tool.
 - An MCP tool's name is split into server and tool (`mcp__slack__search_messages`).
+- `aimux.reasoned` on a model call says whether the answer held reasoning, noted as the answer passes and without keeping any of it. It is left out where an engine's answer does not show it, never written as false on a guess.
 - The collector's lines are `secondary`: they add a duration, a class of failure, the harness's turn id and a subagent's kind to a call the proxy recorded, and are never counted as calls. A reader merges them by session and call id.
 
 ## Review Focus
@@ -91,11 +105,14 @@ call lines     model calls and tool calls: session id, agent id, their own ids. 
 - [ ] Which header carries the upstream's request id on an Anthropic answer, and is there one for Codex? Does it equal the `request_id` telemetry reports for the same call?
 - [ ] Does an MCP request reaching the MCP proxy carry the harness's tool call id?
 - [ ] The cost of reading tool blocks from a 50 KB, a 1 MB and a 5 MB request, 200 runs each.
+- [ ] How each engine's answer shows that the model reasoned (a block of its own, a count of tokens), and whether that can be read for every engine the proxy has.
+- [ ] Does anything in a request tie a session to the session that started it (the harness's side work, a resumed session, a forked one, a session started by a command)?
+- [ ] The ledger is pinned to version 1.27.0 of OpenTelemetry's conventions for AI. Which names for agents, conversations and tool executions exist in the current version, and does the pin need raising?
 - [ ] Record the results. If any case leaves a call that would be written twice, missed, or given to the wrong agent or model call, stop and bring it to the owner: task 4 rests on it.
 
 ### Task 2: The collector is a part of aimux
 
-Asked for by the owner. Independent of the record: it can ship at any point before task 6.
+Asked for by the owner. Independent of the record: it can ship at any point before task 7.
 
 **Files:** Modify `internal/parts/registry.go`, `internal/parts/settings.go`, `internal/parts/jobfile.go`, `internal/controller/partsmenu.go`, `internal/controller/upgrade.go`, `cmd/aimux/cmd/setup.go`, `cmd/aimux/cmd/collect.go`; tests beside them.
 
@@ -112,7 +129,7 @@ Asked for by the owner. Independent of the record: it can ship at any point befo
 
 **Files:** Modify `internal/ledger/line.go`, `internal/ledger/count.go`, `docs/ledger-identity.md`; tests beside them.
 
-**Interfaces:** Produces `KindSession = "session"`, `KindAgent = "agent"`; on `ledger.Line`: `HarnessVersion` (`aimux.harness_version`), `Place` (`aimux.place`), `Sandbox` (`aimux.sandbox`), `PlaceRequest` (`aimux.place_request`), `Learned` (`aimux.learned`), `AgentParent` (`aimux.agent_parent`), `AgentType` (`aimux.agent_type`), `Request` (`aimux.request`), `AskedBy` (`aimux.asked_by`), `ToolName` (`gen_ai.tool.name`), `ToolServer` (`aimux.tool.server`), `ErrorType` (`aimux.error_type`), `PromptID` (`aimux.prompt_id`); `LearnedSeen`, `LearnedReported`, `LearnedVerified`; `PlaceHost`, `PlaceSandbox`; `OutcomeError = "error"`; `ledger.Name(s string) string`; `ledger.SplitTool(name string) (server, tool string)`.
+**Interfaces:** Produces `KindSession = "session"`, `KindAgent = "agent"`; on `ledger.Line`: `HarnessVersion` (`aimux.harness_version`), `Place` (`aimux.place`), `Sandbox` (`aimux.sandbox`), `PlaceRequest` (`aimux.place_request`), `Learned` (`aimux.learned`), `AgentParent` (`aimux.agent_parent`), `AgentType` (`aimux.agent_type`), `Request` (`aimux.request`), `AskedBy` (`aimux.asked_by`), `ToolName` (`gen_ai.tool.name`), `ToolServer` (`aimux.tool.server`), `ErrorType` (`aimux.error_type`), `PromptID` (`aimux.prompt_id`); `StartedBy` (`aimux.started_by`), `Reasoned *bool` (`aimux.reasoned`); `LearnedSeen`, `LearnedReported`, `LearnedVerified`; `PlaceHost`, `PlaceSandbox`; `OutcomeError = "error"`; `ledger.Name(s string) string`; `ledger.SplitTool(name string) (server, tool string)`.
 
 - [ ] Test: each new line round-trips; a line without the new fields reads as before.
 - [ ] Test: `Count` counts a tool call once when the proxy's line and a secondary line share its id **within the same session**, never across sessions; a secondary line with no line from the proxy is reported as an orphan and is not counted as a call; the MCP proxy's existing counting rule holds as it is; a `session` or `agent` line is never counted as a call.
@@ -120,7 +137,22 @@ Asked for by the owner. Independent of the record: it can ship at any point befo
 - [ ] Test: `Name` and `SplitTool` on names with `__` inside the tool part, a space, a slash, 129 characters.
 - [ ] Implement, and write the identity section above into `docs/ledger-identity.md` as the rule.
 
-### Task 4: The proxy writes session, agent and tool-call lines
+### Task 4: The index
+
+The ledger's files are the truth and stay as they are: append-only text. Every read scanning them from the start does not hold (a year is some two million lines), and a chart should be one grouped query. So a small database is kept beside the files, built from them and rebuildable from them at any time: the one place every reader asks. aimux does the same for session search (`~/.aimux/search.db` over the transcripts).
+
+**Files:** Create `internal/ledger/index/` (`index.go`, `schema.go`, `fold.go`); tests beside them. Uses the SQLite driver already in `go.mod`.
+
+**Interfaces:** Consumes task 3. Produces `index.Open(dir string) (*Index, error)` (`~/.aimux/ledger/index.db`); `(*Index).Refresh() error`, which folds in the lines written since the last call, by each file's offset, applying `ledger.Count`'s rules as it goes; `index.Rebuild(dir string) error`; tables `sessions` (id, harness, harness_version, place, sandbox, started_by, first_at, last_at), `agents` (session, agent, parent, type), `model_calls` (session, agent, call, at, turn, request, engine, asked and served model, effort, reasoned, tokens in, cached, out, duration, outcome, learned) and `tool_calls` (session, agent, call, at, asked_by, tool, server, outcome, error_type, duration, learned); a schema version, and a rebuild when it differs.
+
+- [ ] Test: an index built line by line as files grow equals one rebuilt from the same files; deleting the database loses nothing.
+- [ ] Test: a secondary line arriving before or after the proxy's line gives the same row; a `session` or `agent` line that changes a fact updates its row and keeps the earlier value's time.
+- [ ] Test: a torn last line is not folded in until it is whole; a file that shrank or was replaced triggers a rebuild of that file's rows.
+- [ ] Test: two processes refreshing at once (the TUI and a command) do not corrupt it or count a line twice.
+- [ ] Test: over a simulated year (two million lines), a refresh after one new line and a query of the last day each take under 50 ms, and a full rebuild is timed and recorded.
+- [ ] Implement.
+
+### Task 5: The proxy writes session, agent and tool-call lines
 
 **Files:** Modify `internal/modelproxy/callfacts.go`, `internal/modelproxy/ledgerline.go`, `internal/modelproxy/turns.go`; create `internal/modelproxy/toolfacts.go`; tests beside them, with requests in `internal/modelproxy/testdata/tools/`.
 
@@ -139,15 +171,15 @@ Asked for by the owner. Independent of the record: it can ship at any point befo
 - [ ] Measure as task 1 set out, in the real proxy; stop and bring it to the owner if the budget in Global Constraints is exceeded.
 - [ ] Implement.
 
-### Task 5: The meter stays right
+### Task 6: The meter stays right
 
 **Files:** Modify `internal/controller/meter.go`, its tests; `cmd/aimux/cmd/cost.go`.
 
 - [ ] Test: with the new lines in the file, `aimux cost` shows the same requests and tokens as without them.
 - [ ] Test: `aimux cost --by tool` gives calls and failures per tool, MCP tools under their server, and time where a duration is known.
-- [ ] Implement. Release tasks 3 to 5 and run `aimux upgrade`: from here the owner's ledger holds his tool calls.
+- [ ] Implement, reading through the index of task 4. Release tasks 3 to 6 and run `aimux upgrade`: from here the owner's ledger holds his tool calls.
 
-### Task 6: What only the harness knows, from telemetry
+### Task 7: What only the harness knows, from telemetry
 
 **Files:** Create `internal/otel/ledgerfacts.go`; modify `internal/otel/receiver.go` (one call where a log event is handled, and health); tests beside them.
 
@@ -156,22 +188,24 @@ Asked for by the owner. Independent of the record: it can ship at any point befo
 - [ ] Test: a real `tool_result` event gives a secondary line with its duration and error class; an `api_request` or `subagent_completed` naming a kind gives one `agent` line per subagent.
 - [ ] Test: from events holding prompts, tool input, tool parameters, the account's email and ids, none of it is in the ledger file or the collector's log.
 - [ ] Test: the same event twice is one line; the span the collector stores for an event is what it stored before this change.
-- [ ] Test: with the collector off, the timeline of task 7 is complete and says durations and kinds are not known.
+- [ ] Test: with the collector off, the timeline of task 8 is complete and says durations and kinds are not known.
 - [ ] Implement.
 
-### Task 7: The timeline
+### Task 8: The timeline and the profile
 
 **Files:** Create `internal/controller/timeline.go`, `cmd/aimux/cmd/timeline.go`; modify `internal/frontend/web/handlers.go`, `server.go`, `smoke_test.go`; tests beside them.
 
-**Interfaces:** Produces `controller.Timeline(dir, session string) (TimelineReport, error)` with `Session{Harness, HarnessVersion, Place, Sandbox}`, `Agents []TimelineAgent{ID, Parent, Type}`, `Entries []TimelineEntry{At, Turn, Kind, Agent, What, Server, AskedBy, DurationMS, Outcome, Learned}` and `NotSeen []string`. CLI `aimux timeline <session>` (`--json`; a prefix of the id accepted). Web `GET /api/timeline?session=`.
+**Interfaces:** Produces `controller.Timeline(dir, session string) (TimelineReport, error)` with `Session{Harness, HarnessVersion, Place, Sandbox}`, `Agents []TimelineAgent{ID, Parent, Type}`, `Entries []TimelineEntry{At, Turn, Kind, Agent, What, Server, AskedBy, DurationMS, Outcome, Learned}` and `NotSeen []string`. `controller.SessionProfile(dir, session string) (Profile, error)`: the session and, for each agent of its tree (`root` first, each under its parent), its kind, its model calls (how many, on which models, at which effort, how many reasoned), its tokens, its tools with counts and failures, its MCP servers with counts, and the time spent in tools where known; each level the sum of the one below. Both read through the index of task 4 and return versioned structures with full ids, so a judgment can be attached to a session, an agent run or a call and found again. CLI `aimux timeline <session>` and `aimux profile <session>` (`--json`; a prefix of the id accepted). Web `GET /api/timeline?session=` and `GET /api/profile?session=`.
 
 - [ ] Test: a session with model calls, built-in tools, an MCP tool, two subagents at once and a nested one comes out in order, each tool call under the model call that asked for it, each entry saying how it was learned.
 - [ ] Test: a tool call with a secondary line shows its duration; one without says the duration is not known.
 - [ ] Test: a session with no lines from the proxy says its calls were not seen; an ambiguous prefix is an error naming the candidates.
-- [ ] Test (e2e): `aimux timeline <id> --json` validates; (smoke) the endpoint answers.
+- [ ] Test: the profile of a session with two subagents and a nested one has four agents in a tree, and the session's totals equal the sum of its agents'.
+- [ ] Test: a session whose calls did not reason, or whose engine does not show it, says so apart: `reasoned` none against `reasoned` not known.
+- [ ] Test (e2e): `aimux timeline <id> --json` and `aimux profile <id> --json` validate; (smoke) the endpoints answer.
 - [ ] Implement.
 
-### Task 8: What kind of work a subagent did
+### Task 9: What kind of work a subagent did
 
 **Files:** Create `internal/controller/subagentwork.go`, test beside it; modify `cmd/aimux/cmd/cost.go`.
 
@@ -180,7 +214,17 @@ Asked for by the owner. Independent of the record: it can ship at any point befo
 - [ ] Test: runs with each mix of tools get the right label; `aimux cost --by subagent` prints kind, what it did, runs, model calls and tokens.
 - [ ] Implement. This replaces `scripts/helper-work.py` as the source for stage 6; the script stays for comparison until the two agree on the same week and the same runs.
 
-### Task 9: Docs, tracker, and the owner's close
+### Task 10: Agents can ask
+
+**Files:** Modify `internal/sessionmcp/server.go` (where `list_sessions` and `get_session` are defined) and `cmd/aimux/cmd/mcp.go`; tests beside them.
+
+**Interfaces:** Consumes tasks 6, 8 and 9. Produces two read-only MCP tools beside `list_sessions` and `get_session`, thin wrappers with no logic of their own: `get_session_timeline` (a session id or prefix; the timeline and the profile of task 8) and `get_usage` (a period and a grouping: session, model, tool, role or kind of subagent; the meter of task 6). The session ids they return are the ones `get_session` and `continue_session` take.
+
+- [ ] Test: each tool returns what its command prints as JSON, for the same input.
+- [ ] Test: a session that is not there, an ambiguous prefix and a grouping that does not exist each give an error an agent can act on.
+- [ ] Implement.
+
+### Task 11: Docs, tracker, and the owner's close
 
 - [ ] Docs: `docs/ledger-identity.md`; the cost guide (`--by tool`, `--by subagent`, `aimux timeline`); what the proxy and the collector read and never keep; the parity table.
 - [ ] Tracker: stage 5 row; the unverified items with what was found; the decisions (the proxy is the record; identity on session and agent lines; how a line was learned).
@@ -194,4 +238,7 @@ Asked for by the owner. Independent of the record: it can ship at any point befo
 - Another harness's front (the Codex CLI through the Responses API): it fills the same facts; stage 8.
 - A hook that reports or refuses a tool call.
 - The MCP proxy writing lines of its own: the proxy's line already names the MCP tool and its server, so the MCP proxy's record would add nothing to a session's story until it can know the session.
-- The TUI and dashboard views of the timeline (stage 5b).
+- The TUI and dashboard views of the timeline and the profile, and charts over the index (stage 5b): after a week of real data shows which are worth drawing.
+- Writing a session out as an OpenTelemetry trace or an agent trajectory file: when the eval engine is planned and says which it wants.
+- Money: the figures are tokens until there is one price table.
+- Splitting the ledger's files by month. The index makes reads fast whatever the files' size; it becomes housekeeping.

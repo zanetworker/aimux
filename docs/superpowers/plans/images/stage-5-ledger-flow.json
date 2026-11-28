@@ -17,9 +17,9 @@
     {"type": "card", "id": "lm", "x": 690, "y": 210, "w": 210, "h": 50, "title": "Model calls", "sub": "ids, tokens, engine"},
     {"type": "card", "id": "lt", "x": 690, "y": 270, "w": 210, "h": 50, "title": "Tool calls", "sub": "ids, tool, outcome"},
     {"type": "text", "x": 690, "y": 340, "w": 210, "h": 60, "text": "Every line says how it was learned:\nseen · reported · verified", "size": 10, "italic": true},
-    {"type": "text", "x": 690, "y": 410, "w": 210, "h": 40, "text": "Call lines carry ids only.\nOne file per month.", "size": 10, "italic": true},
+    {"type": "text", "x": 690, "y": 410, "w": 210, "h": 40, "text": "Call lines carry ids only.\nAn index beside the files\nanswers every reader.", "size": 10, "italic": true},
 
-    {"type": "card", "id": "read", "x": 980, "y": 180, "w": 130, "h": 130, "title": "Read functions", "sub": "one place, versioned", "desc": "Timeline\nMeter\nSubagentWork"},
+    {"type": "card", "id": "read", "x": 980, "y": 180, "w": 130, "h": 130, "title": "Read functions", "sub": "one place, versioned", "desc": "Timeline\nProfile\nMeter"},
 
     {"type": "container", "x": 1170, "y": 40, "w": 200, "h": 440, "label": "Where it is read", "kind": "open"},
     {"type": "card", "id": "o1", "x": 1185, "y": 80, "w": 170, "h": 55, "title": "CLI", "sub": "aimux timeline, aimux cost"},
