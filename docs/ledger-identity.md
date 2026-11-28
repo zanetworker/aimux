@@ -17,6 +17,22 @@ Every line carries up to four ids, and the join is decided when the line is writ
 
 Each line also carries its writer's name and a sequence number that only goes up for that writer. Hook events carry an event id: the call id plus the hook event's name.
 
+## Sessions, agents and calls
+
+A session is the parent of everything. Inside it, agents form a tree: the main conversation is the agent `root`, a subagent names the agent that started it, and a subagent may start its own. A call, a model request or a tool invocation, belongs to exactly one agent. Three levels can be read, each the sum of the one below: the session, an agent's run, a call.
+
+| Line | Says | Carries |
+|---|---|---|
+| `session` | who and where a session is | its harness and version, where it runs (`aimux.place`: `host` or `sandbox`, written only on evidence, with `aimux.sandbox`), the session that started it when something says so (`aimux.started_by`) |
+| `agent` | who an agent is | its parent (`aimux.agent_parent`) and its kind (`aimux.agent_type`) |
+| `model_call`, `tool_call` | what happened | the session, the agent, and ids. Nothing about who or where |
+
+A fact of a session or an agent is written once on its own line, and again, with its time, when it changes; a reader takes the one in force at the time of a call. So a fact that arrives later, an identity among them, reaches every call without a call line changing. A line never has a field only one harness can fill: what a harness cannot supply is left out.
+
+A tool call carries the harness's id for it as `call`, the model call that asked for it as `aimux.asked_by`, its tool as `gen_ai.tool.name` and, for an MCP tool, its server as `aimux.tool.server`. A model call may carry the upstream's own id for the request as `aimux.request`, and `aimux.reasoned` when the engine's answer shows whether it reasoned.
+
+Every line says how it was learned (`aimux.learned`): `seen` when aimux carried the call itself, `reported` when the harness said so, `verified` when a supervisor outside the agent recorded it. `seen` means the call passed through aimux; whether a tool succeeded is still what the harness put in its result.
+
 ## Which lines carry which ids
 
 | Kind | Written by | Ids it carries |
@@ -30,17 +46,19 @@ Each line also carries its writer's name and a sequence number that only goes up
 
 ## The counting rule
 
-A harness's call id is only unique inside its session, so the reader identifies a call by session and call id together. The one exception is a secondary line, which carries no session and can only be matched to a primary line by call id alone.
+A harness's call id is only unique inside its session, so the reader identifies a call by session and call id together. A secondary line that names its session is matched within it. The one exception is a secondary line that carries no session, as the MCP proxy's do, which can only be matched to a primary line by call id alone.
 
 A reader applies these rules when it reads, so the order lines arrive in does not matter.
 
 1. Two lines from the same writer and session with the same event id are one line, and the earliest is kept. This is how a hook event delivered twice is counted once.
-2. A secondary tool call is dropped when a primary tool call has the same call id. The primary line is the record; the secondary one is only a cross-check.
+2. A secondary tool call is dropped when a primary tool call has the same call id. The primary line is the record; the secondary one is only a cross-check. A secondary line that names its session is matched within that session only, and lends the record what the record lacks: a duration, a class of failure, the harness's own turn id. What the record already says is never replaced.
 3. A secondary tool call with no call id is listed as unmatched. It is never counted and never silently dropped.
-4. A secondary tool call whose call id no primary line has is counted, once. It is then the only record of that call. It counts even without a session, which the MCP proxy never has today: the call happened, and who made it is unknown.
+4. A secondary tool call whose call id no primary line has is counted, once, unless rule 9 sets it apart. It is then the only record of that call. It counts even without a session, which the MCP proxy never has today: the call happened, and who made it is unknown.
 5. Any line with no session is listed as unmatched, except a line written by the tool gateway, because an admin-token caller has no session and its calls and verdicts are still real.
 6. The order of the input lines does not change the result.
 7. Two primary tool calls with the same session and call id are one invocation, and the earliest is kept. This covers a sandbox that has hooks, where the collector and the tool gateway would both report the same call.
+8. A `session` or `agent` line is a fact, not a call. One with no session is listed as unmatched. A writer's fact about a session or an agent that is written again unchanged, as a writer that restarted does, is held to one, the earliest; one that differs from the last is kept, with its time, also when it returns to an earlier value. The same fact learned another way (seen, reported) is another line.
+9. A secondary tool call that a harness reported (`aimux.learned` is `reported`), that names its session, and whose call no primary line in that session has, is an orphan: something was reported for a call nothing recorded. It is set apart, and never counted as a call. A secondary line written on the call's own path, as the MCP proxy's are, is a witness and stays under rule 4.
 
 When rules overlap they apply in this order: duplicates are removed first (rule 1), then a secondary tool call that a primary line covers is dropped (rule 2), even when it has no session, and only then are lines with no call id or no session set apart (rules 3 and 5).
 

@@ -11,9 +11,12 @@ const writerToolGateway = "tool-gateway"
 
 // Counted is the result of applying the counting rule to a set of lines.
 type Counted struct {
-	Lines     []Line           // the lines that count, in time order
-	Unmatched []Line           // secondary lines with no call id, or lines with no session
-	Gaps      map[string][]Gap // per writer, sequence numbers missing between the lowest and highest seen
+	Lines     []Line // the lines that count, in time order
+	Unmatched []Line // secondary lines with no call id, or lines with no session
+	// Orphans are secondary lines a harness reported (LearnedReported) that name a session and have no record
+	// of their call in it. They are evidence, set apart, and never counted as calls.
+	Orphans []Line
+	Gaps    map[string][]Gap // per writer, sequence numbers missing between the lowest and highest seen
 }
 
 // Count applies the rule that gives every action exactly one line that
@@ -22,7 +25,10 @@ type Counted struct {
 // tool call that a primary line covers is dropped (even with no session),
 // then lines missing a call id or a session are set apart as unmatched. A
 // secondary line that is the only record of its call is counted even with
-// no session, and two primary lines for one call id count once.
+// no session, and two primary lines for one call id count once. A session
+// or agent line is a fact, not a call: an equal one written again is held to
+// one. A secondary line that names its session is matched within it, and
+// lends its record what the record lacks.
 func Count(lines []Line) Counted {
 	sorted := slices.Clone(lines)
 	for i := range sorted {
@@ -60,11 +66,53 @@ func Count(lines []Line) Counted {
 	}
 
 	type callKey struct{ session, call string }
+	// A secondary line that names its session is matched within that session only: a harness's ids mean
+	// nothing outside it. What it knows that the record lacks is lent to the record afterwards (rule 2).
+	primaryInSession := map[callKey]bool{}
+	for _, l := range kept {
+		if l.Kind == KindToolCall && !l.Secondary && l.Call != "" && l.Session != "" {
+			primaryInSession[callKey{l.Session, l.Call}] = true
+		}
+	}
+	lent := map[callKey][]Line{}
+	// A fact is one writer's word about one session or agent; the last one kept for each is what a new line is
+	// compared with.
+	type factOf struct {
+		kind                   Kind
+		session, agent, writer string
+	}
+	type fact struct{ harness, version, place, sandbox, placeRequest, startedBy, parent, agentType, learned string }
+	lastFact := map[factOf]fact{}
 	countedCalls := map[callKey]bool{}
 	for _, l := range kept {
+		if l.Kind == KindSession || l.Kind == KindAgent {
+			if l.Session == "" {
+				out.Unmatched = append(out.Unmatched, l) // a fact that cannot be tied to a session
+				continue
+			}
+			// Rule 8: a fact written again unchanged (a writer that restarted) is held to one, the earliest. One
+			// that differs from the last is kept, also when it returns to an earlier value.
+			k := factOf{l.Kind, l.Session, l.Agent, l.Writer}
+			f := fact{l.Harness, l.HarnessVersion, l.Place, l.Sandbox, l.PlaceRequest, l.StartedBy, l.AgentParent, l.AgentType, l.Learned}
+			if last, seen := lastFact[k]; !seen || last != f {
+				lastFact[k] = f
+				out.Lines = append(out.Lines, l)
+			}
+			continue
+		}
 		if l.Kind == KindToolCall && l.Secondary {
 			if l.Call == "" {
 				out.Unmatched = append(out.Unmatched, l) // rule 3
+				continue
+			}
+			if k := (callKey{l.Session, l.Call}); l.Session != "" && primaryInSession[k] {
+				lent[k] = append(lent[k], l) // rule 2, within its session
+				continue
+			}
+			if l.Session != "" && l.Learned == LearnedReported {
+				// rule 9: what a harness reported about a call nothing recorded. A line on the call's own path
+				// (the MCP proxy's) is a witness and falls to rule 4; a report is not.
+				out.Orphans = append(out.Orphans, l)
 				continue
 			}
 			if primaryCalls[l.Call] {
@@ -90,6 +138,25 @@ func Count(lines []Line) Counted {
 			countedCalls[k] = true
 		}
 		out.Lines = append(out.Lines, l)
+	}
+	// What a secondary line knows and its record lacks is lent to the record: a duration, a class of failure, the
+	// harness's turn id. What the record already says is never replaced.
+	for i := range out.Lines {
+		l := &out.Lines[i]
+		if l.Kind != KindToolCall || l.Secondary {
+			continue
+		}
+		for _, more := range lent[callKey{l.Session, l.Call}] {
+			if l.DurationMs == 0 {
+				l.DurationMs = more.DurationMs
+			}
+			if l.ErrorType == "" {
+				l.ErrorType = more.ErrorType
+			}
+			if l.PromptID == "" {
+				l.PromptID = more.PromptID
+			}
+		}
 	}
 	return out
 }
