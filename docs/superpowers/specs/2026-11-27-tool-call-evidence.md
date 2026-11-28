@@ -127,10 +127,36 @@ Two of the nineteen requests belonged to another session on a small model: the h
 
 The proxy, for the record. It saw exactly what the other three saw, it is already the writer of the session's model-call lines, a tool call belongs to the model call that asked for it without any joining, and when the proxy is down the session cannot run, so there is no outage in which calls are lost. Telemetry then adds only what the proxy cannot know (a true duration, the kind of subagent), and the transcript is needed only for sessions outside the proxy.
 
+## Fifth run: the awkward cases, as shapes
+
+Task 1 of the approved plan. Seven short sessions went through a recorder in front of the model proxy that kept only the shape of each request and answer: the roles, the kinds of block, the ids, the failed flag, and the names of headers.
+
+| Case | What the request that follows looks like | Results after the last answer |
+|---|---|---|
+| Three tools asked for in one answer, one failing | the answer with three asks, then one message with three results, in another order than asked | exactly the three, the failed one marked |
+| A session resumed | seven messages, three old results among them, all before the last answer | none taken as new; then the new call's one |
+| `/compact` on that session | **the last tool result is sent again after the last answer** | the same call a second time |
+| After the compaction | the history is gone; a fresh ask and its result | the new call's one |
+| A session killed by its own tool call | the earlier call's result returned; the killing call was asked for and never returned | one returned, one never |
+| The Codex engine, two tools | the same request shapes as for Anthropic; the tools were asked for one after the other, not together | each call's one |
+
+What follows for the plan:
+
+- **"The results after the last answer" finds every finished call**, wherever they sit and in whatever order. A message with the role `system` also arrives after the user's, carrying blocks of a kind of its own (`tool_addition`); a rule about the last message would miss results that such a message follows.
+- **That rule alone writes a call twice.** The compaction request repeats the last result after the last answer. So the proxy must remember what it wrote for a session, and read it back after a restart, as the plan has it. The counting rule holds it to one as well.
+- **An ask with no return is real**: the killed session left one. It is written as asked, result unknown.
+- **Asks are read from the answer as it streams.** Every answer of a conversation was `text/event-stream`, uncompressed, for both engines; the ask's id and name are in the event that opens its block. One Codex request was answered with JSON and no blocks at all, which the reader must take as nothing asked.
+- **Whether the model reasoned shows for Anthropic and not for Codex.** An Anthropic answer that reasoned opens a block of the kind `thinking`. The two Codex answers captured had none, which says only that it is not shown there: for Codex the flag is left out, not written as false.
+- **The upstream's request id** is the header `request-id` on every Anthropic answer. A Codex answer has none.
+- **Nothing ties a session to the one that started it.** The harness's side work ran under session ids of its own (five of them across these runs), on a small model. Its requests carry their own session id in one header and in the request's metadata, and no other session's anywhere. So `aimux.started_by` stays unwritten for it.
+- **The MCP tool call's id.** Claude Code has a name for it on MCP requests (`claudecode/toolUseId`, found in the program), and the MCP proxy passes a request's metadata through without reading it. It was not captured on the wire.
+- **OpenTelemetry's names.** The conventions for AI have moved to a repository of their own; the registry page (at version 1.41.0) lists `gen_ai.conversation.id`, `gen_ai.agent.id`, `gen_ai.agent.name`, `gen_ai.tool.name`, `gen_ai.tool.call.id`, the operations `chat`, `execute_tool` and `invoke_agent`, and `gen_ai.usage.reasoning.output_tokens`. It has no name for an agent's parent. The ledger's own names for a session, an agent and its parent stay as they are; an export maps them.
+
 ## Not measured
 
-- A tool call refused at a permission prompt: whether it leaves a `tool_result`. The attempt did not produce a refusal (the owner's settings allow shell commands), so it is still open.
-- An interactive session, and one continued after `/clear`. The resumed session of the second run was complete.
-- Whether an MCP request reaching the MCP proxy carries the `tool_use_id`.
+- A tool call refused at a permission prompt, and one the owner interrupts: neither could be produced without a person at the keyboard. Two attempts at a refusal ended the run instead.
+- Tools that Codex asks for together in one answer.
+- The cost of reading tool blocks from large requests: measured in the proxy itself, in the task that adds the reading, against the plan's budget.
+- An MCP request on the wire, with its tool call id.
 - Which session id the installed collector files a session's events under.
-- The Codex harness.
+- The Codex harness (the Codex CLI itself, as against the Codex engine behind Claude Code).
