@@ -6,6 +6,10 @@
 
 **Architecture:** The model proxy is the record. Every request a harness sends to a model carries the tool results that just came back and the answer that asked for them; the proxy, which already writes a line per model call, writes a line per finished tool call from that, into the same file. Telemetry, through the collector, adds only what the proxy cannot know: how long a tool really took, and what kind a subagent is. Session and agent facts live on lines of their own, so a call line carries ids and nothing about who or where. Nothing depends on a hook, and nothing in the record depends on the collector being up.
 
+![Inputs, the model proxy and the collector, the ledger, and where it is read](images/stage-5-ledger-flow.png)
+
+*Who sends, what carries and listens, what is kept, and where it is read. Solid: today or built in this stage. Dashed: later. Source: `images/stage-5-ledger-flow.json`.*
+
 **How this plan got here.** Four evidence runs (`2026-11-27-tool-call-evidence.md`): the transcript, the hooks, the telemetry and the traffic through the proxy each showed the same tool calls. A hook costs a process per call on the hook the owner's permission alerts use. Telemetry loses calls in any collector outage, however short. The proxy loses nothing a session did not lose itself, already owns the model-call lines, and is the only source that has a run's history in hand when it would choose a model (stage 6).
 
 **The trace and the ledger are not the same thing.** The trace holds everything a session did, content included, in the collector's memory, as the harness reports it about itself. The ledger holds names, ids, timings and outcomes, on disk, with no content, and is the only record of what aimux itself did. The trace is for "what exactly happened in this session"; the ledger is for "how much, on what, by whom, and is anything missing".

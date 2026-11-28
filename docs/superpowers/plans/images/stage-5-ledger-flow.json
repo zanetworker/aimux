@@ -1,0 +1,52 @@
+{
+  "style": "paper",
+  "elements": [
+    {"type": "container", "x": 20, "y": 40, "w": 210, "h": 440, "label": "Inputs: who sends", "kind": "open"},
+    {"type": "card", "id": "cc", "x": 40, "y": 80, "w": 170, "h": 70, "title": "Claude Code", "sub": "main conversation\nand its subagents"},
+    {"type": "card", "id": "other", "x": 40, "y": 190, "w": 170, "h": 60, "title": "Other harnesses", "sub": "Codex CLI and more", "kind": "closed"},
+    {"type": "card", "id": "osh", "x": 40, "y": 330, "w": 170, "h": 100, "title": "OpenShell sandbox", "sub": "its supervisor's audit log\n(OCSF) and trace relay", "kind": "closed"},
+
+    {"type": "container", "x": 320, "y": 40, "w": 290, "h": 440, "label": "aimux: what carries and listens", "kind": "open"},
+    {"type": "card", "id": "proxy", "x": 340, "y": 80, "w": 250, "h": 130, "title": "Model proxy", "sub": "the record", "desc": "1  reads each request into neutral facts\n2  notes each tool the model asks for\n3  matches each result to it, by id", "tone": "focus"},
+    {"type": "card", "id": "eng", "x": 340, "y": 240, "w": 250, "h": 50, "title": "Engines", "sub": "Anthropic · Codex · a gateway"},
+    {"type": "card", "id": "col", "x": 340, "y": 330, "w": 250, "h": 100, "title": "Collector", "sub": "a managed aimux part", "desc": "traces, as today\nadds duration and kind of subagent"},
+
+    {"type": "container", "x": 670, "y": 40, "w": 250, "h": 440, "label": "Ledger: on disk, no content", "kind": "open", "tone": "ink"},
+    {"type": "card", "id": "ls", "x": 690, "y": 80, "w": 210, "h": 60, "title": "Session lines", "sub": "harness, where it runs\nlater: who it acts for"},
+    {"type": "card", "id": "la", "x": 690, "y": 150, "w": 210, "h": 50, "title": "Agent lines", "sub": "parent agent, kind"},
+    {"type": "card", "id": "lm", "x": 690, "y": 210, "w": 210, "h": 50, "title": "Model calls", "sub": "ids, tokens, engine"},
+    {"type": "card", "id": "lt", "x": 690, "y": 270, "w": 210, "h": 50, "title": "Tool calls", "sub": "ids, tool, outcome"},
+    {"type": "text", "x": 690, "y": 340, "w": 210, "h": 60, "text": "Every line says how it was learned:\nseen · reported · verified", "size": 10, "italic": true},
+    {"type": "text", "x": 690, "y": 410, "w": 210, "h": 40, "text": "Call lines carry ids only.\nOne file per month.", "size": 10, "italic": true},
+
+    {"type": "card", "id": "read", "x": 980, "y": 180, "w": 130, "h": 130, "title": "Read functions", "sub": "one place, versioned", "desc": "Timeline\nMeter\nSubagentWork"},
+
+    {"type": "container", "x": 1170, "y": 40, "w": 200, "h": 440, "label": "Where it is read", "kind": "open"},
+    {"type": "card", "id": "o1", "x": 1185, "y": 80, "w": 170, "h": 55, "title": "CLI", "sub": "aimux timeline, aimux cost"},
+    {"type": "card", "id": "o2", "x": 1185, "y": 143, "w": 170, "h": 45, "title": "MCP tools", "sub": "agents ask"},
+    {"type": "card", "id": "o3", "x": 1185, "y": 196, "w": 170, "h": 45, "title": "Dashboard and API"},
+    {"type": "card", "id": "o4", "x": 1185, "y": 249, "w": 170, "h": 45, "title": "TUI"},
+    {"type": "card", "id": "o5", "x": 1185, "y": 320, "w": 170, "h": 55, "title": "Eval engine", "sub": "where to look", "kind": "closed"},
+    {"type": "card", "id": "o6", "x": 1185, "y": 385, "w": 170, "h": 70, "title": "Routing, stage 6", "sub": "the proxy picks\nthe model per call", "kind": "closed"},
+
+    {"type": "edge", "points": [[210, 105], [340, 105]]},
+    {"type": "text", "x": 232, "y": 84, "w": 90, "h": 16, "text": "model requests", "size": 10, "italic": true},
+    {"type": "edge", "points": [[210, 135], [275, 135], [275, 355], [340, 355]]},
+    {"type": "text", "x": 281, "y": 240, "w": 56, "h": 16, "text": "telemetry", "size": 10, "italic": true},
+    {"type": "edge", "points": [[210, 400], [340, 400]], "dashed": true},
+    {"type": "text", "x": 236, "y": 404, "w": 84, "h": 30, "text": "audit log,\nrelay (later)", "size": 10, "italic": true},
+    {"type": "edge", "points": [[465, 210], [465, 240]]},
+    {"type": "edge", "points": [[590, 125], [670, 125]], "tone": "focus"},
+    {"type": "text", "x": 612, "y": 104, "w": 40, "h": 16, "text": "seen", "size": 10, "italic": true},
+    {"type": "edge", "points": [[590, 375], [670, 375]]},
+    {"type": "text", "x": 604, "y": 354, "w": 56, "h": 16, "text": "reported", "size": 10, "italic": true},
+    {"type": "edge", "points": [[920, 245], [980, 245]]},
+    {"type": "edge", "points": [[1110, 245], [1170, 245]]},
+
+    {"type": "legend", "x": 20, "y": 500, "items": [
+      {"kind": "open", "tone": "focus", "text": "the record"},
+      {"kind": "open", "text": "today, or built in stage 5"},
+      {"kind": "closed", "text": "later"}
+    ]}
+  ]
+}
