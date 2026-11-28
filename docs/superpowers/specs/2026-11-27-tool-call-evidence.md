@@ -94,6 +94,39 @@ Task 1 of the plan. Each row is one throwaway session whose telemetry went to a 
 
 Telemetry alone would leave holes after every upgrade. The transcript closes them without a hook: it is on disk, it holds every tool call's id and name and whether its result was an error, and reading those three things is not reading content. So the collector's lines are the live record, and a tool call the transcript has and the ledger lacks is added from the transcript, marked as such, with no duration (the transcript does not give one). The plan gains that as a task.
 
+## Fourth run: what the model proxy can read from the traffic
+
+The owner asked what the alternatives were and whether they had been studied. One had not: every request a harness sends to the model holds the conversation so far, with the tool calls the model asked for and the results that came back. A recorder was put between Claude Code and the model proxy for one two-turn session (the same kind as the second run, twelve tool calls). It kept only ids, tool names and the failed flag, and the names of the headers.
+
+| Source | Tool calls seen | The same twelve as the transcript |
+|---|---|---|
+| Transcript | 12 | |
+| Hooks | 12 | yes |
+| Telemetry | 12 | yes |
+| The traffic: asked for in an answer | 12 | yes |
+| The traffic: result seen in a later request | 12 | yes |
+
+What the traffic gives, for each of the twelve:
+
+- **The id and the name**, the moment the model asks for the tool, and again in every later request of that conversation.
+- **The full name of an MCP tool** (`mcp__aimux__list_sessions`), with no telemetry setting involved.
+- **Failed or not**, from the result's `is_error`: the same answer as the hook's for all twelve.
+- **The subagent and its parent**, from two request headers: `x-claude-code-agent-id` matched the hook's `agent_id` on every call, and there is an `x-claude-code-parent-agent-id`.
+- **What a run has done so far, at the time of each request.** A subagent's second request already lists the tools its first answer used. This is the only source that the proxy has in hand when it would choose a model.
+
+What it does not give:
+
+- **How long a tool took.** The gap between the answer that asked for a tool and the request that brought its result was about one second more than the true duration for a single call, and far off when calls ran together (a six second command read as 35 seconds, because its result came back in the same request as a slow call beside it).
+- **The kind of subagent.** No header carries it.
+- **Anything about a session that does not go through the proxy.**
+- **A tool call whose result is never sent back**, such as the last one of a session that is killed. All twelve came back here.
+
+Two of the nineteen requests belonged to another session on a small model: the harness's own side work, as the earlier evidence found.
+
+### Which carrier, revisited
+
+The proxy, for the record. It saw exactly what the other three saw, it is already the writer of the session's model-call lines, a tool call belongs to the model call that asked for it without any joining, and when the proxy is down the session cannot run, so there is no outage in which calls are lost. Telemetry then adds only what the proxy cannot know (a true duration, the kind of subagent), and the transcript is needed only for sessions outside the proxy.
+
 ## Not measured
 
 - A tool call refused at a permission prompt: whether it leaves a `tool_result`. The attempt did not produce a refusal (the owner's settings allow shell commands), so it is still open.
